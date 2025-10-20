@@ -40,7 +40,7 @@ phishing-simulator/
 
 ```bash
 # 저장소 클론
-git clone https://github.com/YOUR_USERNAME/phishing-simulator.git
+git clone https://github.com/umgeunchan/phishing-simulator.git
 cd phishing-simulator
 
 # 의존성 설치
