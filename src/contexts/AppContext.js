@@ -1,50 +1,84 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useState } from "react";
+import api, { setAuthToken } from "../utils/api";
 
 const AppContext = createContext();
 
 export const AppProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [trainingHistory, setTrainingHistory] = useState([]);
   const [securityScore, setSecurityScore] = useState(72);
   const [currentScenario, setCurrentScenario] = useState(null);
+  const [loading, setLoading] = useState(false);
 
-  // 앱 시작 시 저장된 데이터 불러오기
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  // 로그인
+  const login = async (username, password) => {
+    setLoading(true);
     try {
-      const history = await AsyncStorage.getItem("trainingHistory");
-      const score = await AsyncStorage.getItem("securityScore");
+      const response = await api.login(username, password);
 
-      if (history) setTrainingHistory(JSON.parse(history));
-      if (score) setSecurityScore(parseInt(score));
+      if (response.success) {
+        const { token } = response.data;
+
+        // 토큰 저장
+        setAuthToken(token);
+
+        // 프로필 가져오기
+        const profileResponse = await api.getProfile();
+        if (profileResponse.success) {
+          setUser(profileResponse.data);
+          setIsAuthenticated(true);
+          return { success: true };
+        }
+
+        return { success: false, error: "프로필을 가져올 수 없습니다" };
+      } else {
+        return { success: false, error: response.error };
+      }
     } catch (error) {
-      console.error("데이터 로드 실패:", error);
+      console.error("로그인 실패:", error);
+      return { success: false, error: error.message };
+    } finally {
+      setLoading(false);
     }
   };
 
-  const saveTrainingResult = async (result) => {
+  // 회원가입
+  const signup = async (username, password) => {
+    setLoading(true);
     try {
-      const newHistory = [result, ...trainingHistory].slice(0, 20); // 최근 20개만 저장
-      await AsyncStorage.setItem("trainingHistory", JSON.stringify(newHistory));
-      setTrainingHistory(newHistory);
+      const response = await api.signup(username, password);
 
-      // 점수 업데이트 로직
-      const newScore = calculateNewScore(result);
-      await AsyncStorage.setItem("securityScore", newScore.toString());
-      setSecurityScore(newScore);
+      if (response.success) {
+        // 회원가입 성공 후 자동 로그인
+        return await login(username, password);
+      } else {
+        return { success: false, error: response.error };
+      }
     } catch (error) {
-      console.error("결과 저장 실패:", error);
+      console.error("회원가입 실패:", error);
+      return { success: false, error: error.message };
+    } finally {
+      setLoading(false);
     }
   };
 
-  const calculateNewScore = (result) => {
-    // 간단한 점수 계산 로직
+  // 로그아웃
+  const logout = () => {
+    setAuthToken(null);
+    setUser(null);
+    setIsAuthenticated(false);
+    setTrainingHistory([]);
+    setSecurityScore(72);
+  };
+
+  const saveTrainingResult = (result) => {
+    const newHistory = [result, ...trainingHistory].slice(0, 20);
+    setTrainingHistory(newHistory);
+
     const scoreChange = result.success ? 5 : -3;
     const newScore = Math.max(0, Math.min(100, securityScore + scoreChange));
-    return newScore;
+    setSecurityScore(newScore);
   };
 
   const getStats = () => {
@@ -55,36 +89,22 @@ export const AppProvider = ({ children }) => {
         ? Math.round((successCount / totalTrainings) * 100)
         : 0;
 
-    // 유형별 성공률
-    const typeStats = {};
-    trainingHistory.forEach((h) => {
-      if (!typeStats[h.scenarioName]) {
-        typeStats[h.scenarioName] = { total: 0, success: 0 };
-      }
-      typeStats[h.scenarioName].total++;
-      if (h.success) typeStats[h.scenarioName].success++;
-    });
-
-    const typeSuccessRates = Object.keys(typeStats).map((type) => ({
-      type,
-      rate: Math.round((typeStats[type].success / typeStats[type].total) * 100),
-    }));
-
-    return {
-      totalTrainings,
-      successRate,
-      typeSuccessRates,
-      learnedTypes: Object.keys(typeStats).length,
-    };
+    return { totalTrainings, successRate };
   };
 
   return (
     <AppContext.Provider
       value={{
+        user,
+        isAuthenticated,
         trainingHistory,
         securityScore,
         currentScenario,
+        loading,
         setCurrentScenario,
+        login,
+        signup,
+        logout,
         saveTrainingResult,
         getStats,
       }}

@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { useApp } from "../contexts/AppContext";
 import { colors } from "../styles/colors";
+import api from "../utils/api";
 
 export default function HomeScreen({ navigation }) {
   const { securityScore, trainingHistory } = useApp();
@@ -27,7 +28,7 @@ export default function HomeScreen({ navigation }) {
             </View>
             <Text style={styles.title}>피싱 시뮬레이터</Text>
           </View>
-          <TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate("Setting")}>
             <Ionicons
               name="settings-outline"
               size={24}
@@ -53,7 +54,46 @@ export default function HomeScreen({ navigation }) {
           </View>
         </View>
       </View>
+      {/* 백엔드 테스트 버튼 */}
+      <TouchableOpacity
+        style={[
+          styles.startButton,
+          { backgroundColor: colors.blue300, marginBottom: 12 },
+        ]}
+        onPress={async () => {
+          console.log("===== 백엔드 연동 테스트 =====");
 
+          // 회원가입
+          const signupResult = await api.signup("testuser123", "test1234");
+          console.log("회원가입:", signupResult);
+
+          if (
+            signupResult.success ||
+            signupResult.error?.includes("already exists")
+          ) {
+            // 로그인
+            const loginResult = await api.login("testuser123", "test1234");
+            console.log("로그인:", loginResult);
+
+            if (loginResult.success) {
+              // 프로필 조회
+              const profileResult = await api.getProfile();
+              console.log("프로필:", profileResult);
+
+              alert(
+                "✅ 백엔드 연동 성공!\n" +
+                  JSON.stringify(profileResult.data, null, 2)
+              );
+            } else {
+              alert("❌ 로그인 실패: " + loginResult.error);
+            }
+          } else {
+            alert("❌ 회원가입 실패: " + signupResult.error);
+          }
+        }}
+      >
+        <Text style={styles.startButtonText}>🧪 백엔드 테스트</Text>
+      </TouchableOpacity>
       {/* Content */}
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* 시뮬레이션 시작 */}
@@ -151,11 +191,17 @@ export default function HomeScreen({ navigation }) {
 
       {/* Bottom Navigation */}
       <View style={styles.bottomNav}>
-        <TouchableOpacity style={styles.navItem}>
+        <TouchableOpacity
+          style={styles.navItem}
+          onPress={() => navigation.navigate("Home")}
+        >
           <Ionicons name="shield" size={20} color={colors.red600} />
           <Text style={[styles.navText, styles.navTextActive]}>홈</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
+        <TouchableOpacity
+          style={styles.navItem}
+          onPress={() => navigation.navigate("Stats")}
+        >
           <Ionicons
             name="trending-up-outline"
             size={20}
@@ -163,7 +209,10 @@ export default function HomeScreen({ navigation }) {
           />
           <Text style={styles.navText}>통계</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
+        <TouchableOpacity
+          style={styles.navItem}
+          onPress={() => navigation.navigate("Setting")}
+        >
           <Ionicons name="settings-outline" size={20} color={colors.slate400} />
           <Text style={styles.navText}>설정</Text>
         </TouchableOpacity>

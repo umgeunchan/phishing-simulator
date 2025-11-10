@@ -6,8 +6,19 @@ export default function BottomNav({ navigation, currentScreen }) {
   const tabs = [
     { name: "Home", icon: "shield", label: "홈" },
     { name: "Stats", icon: "trending-up", label: "통계" },
-    { name: "Settings", icon: "settings", label: "설정" },
+    { name: "Setting", icon: "settings", label: "설정" },
   ];
+
+  const handleTabPress = (screenName) => {
+    console.log("탭 클릭:", screenName);
+    console.log("navigation 객체:", navigation);
+
+    if (navigation && navigation.navigate) {
+      navigation.navigate(screenName);
+    } else {
+      console.error("Navigation이 없습니다!");
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -17,7 +28,7 @@ export default function BottomNav({ navigation, currentScreen }) {
           <TouchableOpacity
             key={tab.name}
             style={styles.tab}
-            onPress={() => navigation.navigate(tab.name)}
+            onPress={() => handleTabPress(tab.name)}
             activeOpacity={0.7}
           >
             <Ionicons
