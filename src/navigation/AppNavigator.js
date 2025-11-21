@@ -4,10 +4,12 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import CallScreen from "../screens/CallScreen";
 import CallSetupScreen from "../screens/CallSetupScreen";
 import HomeScreen from "../screens/HomeScreen";
+import LoginScreen from "../screens/LoginScreen";
 import OnboardingScreen from "../screens/OnboardingScreen";
 import ResultScreen from "../screens/ResultScreen";
 import ScenarioScreen from "../screens/ScenarioScreen";
 import SettingScreen from "../screens/SettingScreen";
+import SignupScreen from "../screens/SignupScreen";
 import StatsScreen from "../screens/StatsScreen";
 
 const Stack = createNativeStackNavigator();
@@ -30,6 +32,8 @@ export default function AppNavigator() {
         <Stack.Screen name="Result" component={ResultScreen} />
         <Stack.Screen name="Stats" component={StatsScreen} />
         <Stack.Screen name="Setting" component={SettingScreen} />
+        <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="Signup" component={SignupScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

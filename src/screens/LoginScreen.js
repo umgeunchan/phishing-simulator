@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -7,9 +8,8 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  useState,
   View,
-} from "react";
+} from "react-native";
 import { useApp } from "../contexts/AppContext";
 import { colors } from "../styles/colors";
 

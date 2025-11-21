@@ -44,14 +44,14 @@ export const AppProvider = ({ children }) => {
   };
 
   // 회원가입
-  const signup = async (username, password) => {
+  const signup = async (username, password, name, age, gender) => {
     setLoading(true);
     try {
-      const response = await api.signup(username, password);
+      const response = await api.signup(username, password, name, age, gender);
 
       if (response.success) {
-        // 회원가입 성공 후 자동 로그인
-        return await login(username, password);
+        // 회원가입 성공
+        return { success: true };
       } else {
         return { success: false, error: response.error };
       }

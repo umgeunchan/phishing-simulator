@@ -1,6 +1,6 @@
 import { getAuthToken } from "./api";
 
-const WS_BASE_URL = "ws://192.168.219.104:8080";
+const WS_BASE_URL = "ws://34.22.110.190:8080";
 
 class WebSocketService {
   constructor() {

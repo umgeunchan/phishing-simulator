@@ -1,4 +1,4 @@
-const API_BASE_URL = "http://192.168.219.104:8080";
+const API_BASE_URL = "http://34.22.110.190:8080";
 
 let authToken = null;
 
@@ -67,18 +67,36 @@ const fetchAPI = async (endpoint, options = {}) => {
 
 export const api = {
   // 회원가입
-  signup: (username, password) =>
-    fetchAPI("/signup", {
+  signup: async (username, password, name, age, gender) => {
+    // age를 정수로 변환
+    const ageNumber = typeof age === "string" ? parseInt(age, 10) : age;
+
+    const requestBody = {
+      username,
+      password,
+      name,
+      age: ageNumber,
+      gender,
+    };
+
+    console.log("📤 회원가입 요청 데이터:", requestBody);
+    console.log("📤 요청 JSON:", JSON.stringify(requestBody));
+
+    const result = await fetchAPI("/signup", {
       method: "POST",
-      body: JSON.stringify({ username, password }),
-    }),
+      body: JSON.stringify(requestBody),
+    });
+    return result;
+  },
 
   // 로그인
-  login: (username, password) =>
-    fetchAPI("/login", {
+  login: async (username, password) => {
+    const result = await fetchAPI("/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
-    }),
+    });
+    return result;
+  },
 
   // 프로필 조회 (인증 필요)
   getProfile: () => fetchAPI("/api/profile"),

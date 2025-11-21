@@ -49,7 +49,7 @@ export default function OnboardingScreen({ navigation }) {
   };
 
   const handleStart = () => {
-    navigation.replace("Home");
+    navigation.replace("Signup");
   };
 
   const currentPageData = pages[currentPage];
