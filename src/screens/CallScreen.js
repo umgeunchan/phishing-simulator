@@ -1,23 +1,75 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useEffect, useState } from "react";
+import { Audio } from "expo-av";
+import * as FileSystem from "expo-file-system";
+import { useEffect, useState, useRef } from "react";
 import {
   Modal,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { useApp } from "../contexts/AppContext";
 import { colors } from "../styles/colors";
+import websocket from "../utils/websocket";
 
 export default function CallScreen({ navigation, route }) {
   const { currentScenario, saveTrainingResult } = useApp();
-  const { callType } = route.params || { callType: "voice" }; // 'voice' 또는 'message'
+  const { callType } = route.params || { callType: "voice" };
 
   const [callTime, setCallTime] = useState(0);
   const [showHint, setShowHint] = useState(false);
   const [showMemo, setShowMemo] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [inputText, setInputText] = useState("");
+  const [simulationResult, setSimulationResult] = useState(null);
+  const scrollViewRef = useRef(null);
+
+  // 음성 통화 관련 상태
+  const [isRecording, setIsRecording] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const recordingRef = useRef(null);
+  const soundRef = useRef(null);
+
+  // 오디오 권한 요청 및 설정
+  useEffect(() => {
+    const setupAudio = async () => {
+      if (callType === "voice") {
+        try {
+          const { status } = await Audio.requestPermissionsAsync();
+          if (status !== "granted") {
+            console.error("마이크 권한이 필요합니다");
+            return;
+          }
+
+          await Audio.setAudioModeAsync({
+            allowsRecordingIOS: true,
+            playsInSilentModeIOS: true,
+            staysActiveInBackground: true,
+            shouldDuckAndroid: true,
+          });
+
+          console.log("✅ 오디오 설정 완료");
+        } catch (error) {
+          console.error("오디오 설정 실패:", error);
+        }
+      }
+    };
+
+    setupAudio();
+
+    // 컴포넌트 언마운트 시 정리
+    return () => {
+      stopRecording();
+      if (soundRef.current) {
+        soundRef.current.unloadAsync();
+      }
+    };
+  }, [callType]);
 
   // 타이머
   useEffect(() => {
@@ -26,6 +78,143 @@ export default function CallScreen({ navigation, route }) {
     }, 1000);
 
     return () => clearInterval(interval);
+  }, []);
+
+  // 녹음 시작
+  const startRecording = async () => {
+    if (isMuted) return;
+
+    try {
+      const recording = new Audio.Recording();
+      await recording.prepareToRecordAsync({
+        android: {
+          extension: ".wav",
+          outputFormat: Audio.AndroidOutputFormat.DEFAULT,
+          audioEncoder: Audio.AndroidAudioEncoder.DEFAULT,
+          sampleRate: 16000,
+          numberOfChannels: 1,
+          bitRate: 128000,
+        },
+        ios: {
+          extension: ".wav",
+          outputFormat: Audio.IOSOutputFormat.LINEARPCM,
+          audioQuality: Audio.IOSAudioQuality.HIGH,
+          sampleRate: 16000,
+          numberOfChannels: 1,
+          bitRate: 128000,
+          linearPCMBitDepth: 16,
+          linearPCMIsBigEndian: false,
+          linearPCMIsFloat: false,
+        },
+        web: {},
+      });
+
+      await recording.startAsync();
+      recordingRef.current = recording;
+      setIsRecording(true);
+      console.log("🎙️ 녹음 시작");
+    } catch (error) {
+      console.error("녹음 시작 실패:", error);
+    }
+  };
+
+  // 녹음 중지 및 전송
+  const stopRecording = async () => {
+    if (!recordingRef.current) return;
+
+    try {
+      setIsRecording(false);
+      await recordingRef.current.stopAndUnloadAsync();
+      const uri = recordingRef.current.getURI();
+      console.log("🎙️ 녹음 완료:", uri);
+
+      if (uri) {
+        // 오디오 파일을 base64로 인코딩하여 전송
+        const base64Audio = await FileSystem.readAsStringAsync(uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        // WebSocket으로 오디오 데이터 전송
+        websocket.send({
+          type: "audio",
+          audio: base64Audio,
+          format: "wav",
+        });
+        console.log("📤 오디오 전송 완료");
+      }
+
+      recordingRef.current = null;
+    } catch (error) {
+      console.error("녹음 중지 실패:", error);
+    }
+  };
+
+  // AI 오디오 응답 재생
+  const playAudioResponse = async (audioData) => {
+    try {
+      setIsPlaying(true);
+
+      // base64 오디오 데이터를 파일로 저장
+      const fileUri = FileSystem.cacheDirectory + "ai_response.mp3";
+      await FileSystem.writeAsStringAsync(fileUri, audioData, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      // 오디오 재생
+      const { sound } = await Audio.Sound.createAsync({ uri: fileUri });
+      soundRef.current = sound;
+
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.didJustFinish) {
+          setIsPlaying(false);
+        }
+      });
+
+      await sound.playAsync();
+      console.log("🔊 AI 응답 재생 중");
+    } catch (error) {
+      console.error("오디오 재생 실패:", error);
+      setIsPlaying(false);
+    }
+  };
+
+  // 마이크 토글
+  const toggleMute = () => {
+    setIsMuted(!isMuted);
+    if (!isMuted && isRecording) {
+      stopRecording();
+    }
+  };
+
+  // WebSocket 메시지 수신
+  useEffect(() => {
+    const handleMessage = (message) => {
+      console.log("📩 수신된 메시지:", message);
+
+      if (message.type === "audio_response" && message.audio) {
+        // AI 음성 응답
+        playAudioResponse(message.audio);
+      } else if (message.type === "ai_message" || message.text) {
+        // AI 텍스트 응답 메시지
+        setMessages((prev) => [
+          ...prev,
+          {
+            type: "ai",
+            text: message.text || message.content,
+            timestamp: new Date(),
+          },
+        ]);
+      } else if (message.type === "simulation_end" || message.result) {
+        // 시뮬레이션 종료
+        setSimulationResult(message.result || message);
+      }
+    };
+
+    websocket.onMessage(handleMessage);
+
+    return () => {
+      websocket.removeMessageHandler(handleMessage);
+    };
   }, []);
 
   // 시간 포맷팅 (00:00)
@@ -37,21 +226,44 @@ export default function CallScreen({ navigation, route }) {
       .padStart(2, "0")}`;
   };
 
+  // 메시지 전송
+  const handleSendMessage = () => {
+    if (!inputText.trim()) return;
+
+    // 내 메시지 추가
+    setMessages((prev) => [
+      ...prev,
+      {
+        type: "user",
+        text: inputText.trim(),
+        timestamp: new Date(),
+      },
+    ]);
+
+    // WebSocket으로 전송
+    websocket.send({ type: "user_message", text: inputText.trim() });
+    setInputText("");
+  };
+
   // 통화 종료
   const handleEndCall = () => {
-    // 임시로 결과 저장
+    // WebSocket 연결 종료
+    websocket.disconnect();
+
+    // 결과 저장
     const result = {
       scenarioName: currentScenario.name,
-      success: Math.random() > 0.5, // 임시로 랜덤
+      success: simulationResult?.success ?? (callTime > 30), // 30초 이상이면 성공으로 간주
       date: new Date().toLocaleString("ko-KR"),
       duration: callTime,
       callType: callType,
+      messages: messages,
     };
 
     saveTrainingResult(result);
 
-    // 결과 화면으로 이동 (나중에 구현)
-    navigation.navigate("Home");
+    // 결과 화면으로 이동
+    navigation.navigate("Result", { result });
   };
 
   if (!currentScenario) {
@@ -78,6 +290,61 @@ export default function CallScreen({ navigation, route }) {
           </View>
         </View>
 
+        {/* 채팅 영역 (문자 시뮬레이션) */}
+        {callType === "message" && (
+          <View style={styles.chatContainer}>
+            <ScrollView
+              ref={scrollViewRef}
+              style={styles.chatScroll}
+              contentContainerStyle={styles.chatContent}
+              onContentSizeChange={() =>
+                scrollViewRef.current?.scrollToEnd({ animated: true })
+              }
+            >
+              {messages.map((msg, index) => (
+                <View
+                  key={index}
+                  style={[
+                    styles.messageBubble,
+                    msg.type === "user"
+                      ? styles.userMessage
+                      : styles.aiMessage,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.messageText,
+                      msg.type === "user"
+                        ? styles.userMessageText
+                        : styles.aiMessageText,
+                    ]}
+                  >
+                    {msg.text}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
+
+            {/* 입력 영역 */}
+            <View style={styles.inputContainer}>
+              <TextInput
+                style={styles.textInput}
+                value={inputText}
+                onChangeText={setInputText}
+                placeholder="메시지를 입력하세요..."
+                placeholderTextColor={colors.slate400}
+                multiline
+              />
+              <TouchableOpacity
+                style={styles.sendButton}
+                onPress={handleSendMessage}
+              >
+                <Ionicons name="send" size={20} color={colors.white} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         {/* 경고 메시지 */}
         <View style={styles.warningBox}>
           <Ionicons name="alert-circle" size={16} color={colors.yellow500} />
@@ -87,24 +354,94 @@ export default function CallScreen({ navigation, route }) {
           </Text>
         </View>
 
-        {/* 버튼 그룹 */}
-        <View style={styles.buttonGroup}>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => setShowMemo(true)}
-          >
-            <Ionicons name="create-outline" size={24} color={colors.white} />
-            <Text style={styles.actionButtonText}>메모하기</Text>
-          </TouchableOpacity>
+        {/* 음성 통화 컨트롤 */}
+        {callType === "voice" && (
+          <View style={styles.voiceControls}>
+            {/* 녹음 상태 표시 */}
+            <View style={styles.recordingStatus}>
+              {isRecording && (
+                <>
+                  <View style={styles.recordingDot} />
+                  <Text style={styles.recordingText}>녹음 중...</Text>
+                </>
+              )}
+              {isPlaying && (
+                <>
+                  <Ionicons name="volume-high" size={16} color={colors.green500} />
+                  <Text style={styles.playingText}>AI 응답 재생 중...</Text>
+                </>
+              )}
+            </View>
 
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => setShowHint(true)}
-          >
-            <Ionicons name="bulb-outline" size={24} color={colors.white} />
-            <Text style={styles.actionButtonText}>힌트 보기</Text>
-          </TouchableOpacity>
-        </View>
+            {/* 음성 컨트롤 버튼 */}
+            <View style={styles.voiceButtonGroup}>
+              {/* 음소거 버튼 */}
+              <TouchableOpacity
+                style={[styles.voiceButton, isMuted && styles.voiceButtonMuted]}
+                onPress={toggleMute}
+              >
+                <Ionicons
+                  name={isMuted ? "mic-off" : "mic"}
+                  size={28}
+                  color={colors.white}
+                />
+                <Text style={styles.voiceButtonText}>
+                  {isMuted ? "음소거 해제" : "음소거"}
+                </Text>
+              </TouchableOpacity>
+
+              {/* 말하기 버튼 (길게 누르기) */}
+              <TouchableOpacity
+                style={[
+                  styles.talkButton,
+                  isRecording && styles.talkButtonActive,
+                ]}
+                onPressIn={startRecording}
+                onPressOut={stopRecording}
+                disabled={isMuted || isPlaying}
+              >
+                <Ionicons
+                  name={isRecording ? "radio-button-on" : "mic-circle"}
+                  size={48}
+                  color={colors.white}
+                />
+                <Text style={styles.talkButtonText}>
+                  {isRecording ? "말하는 중..." : "길게 눌러 말하기"}
+                </Text>
+              </TouchableOpacity>
+
+              {/* 힌트 버튼 */}
+              <TouchableOpacity
+                style={styles.voiceButton}
+                onPress={() => setShowHint(true)}
+              >
+                <Ionicons name="bulb-outline" size={28} color={colors.white} />
+                <Text style={styles.voiceButtonText}>힌트</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* 버튼 그룹 (텍스트 모드) */}
+        {callType === "message" && (
+          <View style={styles.buttonGroup}>
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => setShowMemo(true)}
+            >
+              <Ionicons name="create-outline" size={24} color={colors.white} />
+              <Text style={styles.actionButtonText}>메모하기</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => setShowHint(true)}
+            >
+              <Ionicons name="bulb-outline" size={24} color={colors.white} />
+              <Text style={styles.actionButtonText}>힌트 보기</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
 
       {/* 통화 종료 버튼 */}
@@ -329,5 +666,138 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: colors.white,
+  },
+  // 채팅 스타일
+  chatContainer: {
+    flex: 1,
+    width: "100%",
+    marginBottom: 16,
+  },
+  chatScroll: {
+    flex: 1,
+    backgroundColor: colors.slate900,
+    borderRadius: 12,
+  },
+  chatContent: {
+    padding: 12,
+    gap: 8,
+  },
+  messageBubble: {
+    maxWidth: "80%",
+    padding: 12,
+    borderRadius: 16,
+  },
+  userMessage: {
+    alignSelf: "flex-end",
+    backgroundColor: colors.red600,
+  },
+  aiMessage: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.slate700,
+  },
+  messageText: {
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  userMessageText: {
+    color: colors.white,
+  },
+  aiMessageText: {
+    color: colors.slate300,
+  },
+  inputContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.slate800,
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginTop: 12,
+    gap: 8,
+  },
+  textInput: {
+    flex: 1,
+    fontSize: 15,
+    color: colors.white,
+    maxHeight: 100,
+    paddingVertical: 8,
+  },
+  sendButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.red600,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  // 음성 통화 스타일
+  voiceControls: {
+    width: "100%",
+    alignItems: "center",
+    gap: 24,
+  },
+  recordingStatus: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    height: 24,
+  },
+  recordingDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.red600,
+  },
+  recordingText: {
+    fontSize: 14,
+    color: colors.red600,
+    fontWeight: "500",
+  },
+  playingText: {
+    fontSize: 14,
+    color: colors.green500,
+    fontWeight: "500",
+  },
+  voiceButtonGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 24,
+    width: "100%",
+  },
+  voiceButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: colors.slate800,
+    gap: 4,
+  },
+  voiceButtonMuted: {
+    backgroundColor: colors.red900,
+  },
+  voiceButtonText: {
+    fontSize: 10,
+    color: colors.slate300,
+    marginTop: 4,
+  },
+  talkButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: colors.green800,
+    gap: 4,
+  },
+  talkButtonActive: {
+    backgroundColor: colors.red600,
+  },
+  talkButtonText: {
+    fontSize: 11,
+    color: colors.white,
+    textAlign: "center",
+    marginTop: 4,
   },
 });

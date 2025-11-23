@@ -1,7 +1,26 @@
+// 백엔드 시나리오 ID 매핑
 export const scenarios = [
   {
     id: 1,
-    name: "기관사칭",
+    backendId: "loan_scam", // 백엔드 API에서 사용하는 시나리오 ID
+    name: "대출 사기",
+    danger: "높음",
+    dangerLevel: 3,
+    description: "저금리 대출을 미끼로 한 사기",
+    callerName: "○○금융",
+    callerNumber: "1588-****",
+    warningPoints: [
+      {
+        title: "선입금 요구",
+        description: "대출 전 선입금이나 수수료를 요구하는 것은 사기입니다",
+        severity: "high",
+      },
+    ],
+  },
+  {
+    id: 2,
+    backendId: "government_impersonation",
+    name: "기관 사칭",
     danger: "높음",
     dangerLevel: 3,
     description: "경찰, 검찰, 금융감독원 등을 사칭",
@@ -21,24 +40,9 @@ export const scenarios = [
     ],
   },
   {
-    id: 2,
-    name: "대출사기",
-    danger: "높음",
-    dangerLevel: 3,
-    description: "저금리 대출을 미끼로 한 사기",
-    callerName: "○○금융",
-    callerNumber: "1588-****",
-    warningPoints: [
-      {
-        title: "선입금 요구",
-        description: "대출 전 선입금이나 수수료를 요구하는 것은 사기입니다",
-        severity: "high",
-      },
-    ],
-  },
-  {
     id: 3,
-    name: "택배사칭",
+    backendId: "delivery_scam",
+    name: "택배 사칭",
     danger: "중간",
     dangerLevel: 2,
     description: "택배 문제를 빌미로 한 사기",
@@ -54,7 +58,8 @@ export const scenarios = [
   },
   {
     id: 4,
-    name: "지인사칭",
+    backendId: "family_impersonation",
+    name: "지인 사칭",
     danger: "중간",
     dangerLevel: 2,
     description: "가족, 친구를 사칭한 금전 요구",
@@ -70,7 +75,8 @@ export const scenarios = [
   },
   {
     id: 5,
-    name: "메신저피싱",
+    backendId: "messenger_phishing",
+    name: "메신저 피싱",
     danger: "낮음",
     dangerLevel: 1,
     description: "메신저로 링크를 전송하는 사기",

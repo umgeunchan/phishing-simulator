@@ -9,7 +9,6 @@ import {
 } from "react-native";
 import { useApp } from "../contexts/AppContext";
 import { colors } from "../styles/colors";
-import api from "../utils/api";
 
 export default function HomeScreen({ navigation }) {
   const { securityScore, trainingHistory } = useApp();
@@ -54,46 +53,7 @@ export default function HomeScreen({ navigation }) {
           </View>
         </View>
       </View>
-      {/* 백엔드 테스트 버튼 */}
-      <TouchableOpacity
-        style={[
-          styles.startButton,
-          { backgroundColor: colors.blue300, marginBottom: 12 },
-        ]}
-        onPress={async () => {
-          console.log("===== 백엔드 연동 테스트 =====");
 
-          // 회원가입
-          const signupResult = await api.signup("testuser123", "test1234");
-          console.log("회원가입:", signupResult);
-
-          if (
-            signupResult.success ||
-            signupResult.error?.includes("already exists")
-          ) {
-            // 로그인
-            const loginResult = await api.login("testuser123", "test1234");
-            console.log("로그인:", loginResult);
-
-            if (loginResult.success) {
-              // 프로필 조회
-              const profileResult = await api.getProfile();
-              console.log("프로필:", profileResult);
-
-              alert(
-                "✅ 백엔드 연동 성공!\n" +
-                  JSON.stringify(profileResult.data, null, 2)
-              );
-            } else {
-              alert("❌ 로그인 실패: " + loginResult.error);
-            }
-          } else {
-            alert("❌ 회원가입 실패: " + signupResult.error);
-          }
-        }}
-      >
-        <Text style={styles.startButtonText}>🧪 백엔드 테스트</Text>
-      </TouchableOpacity>
       {/* Content */}
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* 시뮬레이션 시작 */}

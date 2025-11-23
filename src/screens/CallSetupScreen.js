@@ -1,5 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -9,9 +12,11 @@ import {
 import { useApp } from "../contexts/AppContext";
 import { colors } from "../styles/colors";
 import { getDangerColor } from "../utils/scenarios";
+import websocket from "../utils/websocket";
 
 export default function CallSetupScreen({ navigation }) {
   const { currentScenario } = useApp();
+  const [connecting, setConnecting] = useState(false);
 
   if (!currentScenario) {
     return null;
@@ -19,12 +24,39 @@ export default function CallSetupScreen({ navigation }) {
 
   const badgeStyle = getDangerColor(currentScenario.dangerLevel);
 
-  const handleStartCall = () => {
-    navigation.navigate("Call", { callType: "voice" });
+  const handleStartCall = async () => {
+    setConnecting(true);
+    try {
+      // 백엔드 시나리오 ID 사용 (없으면 loan_scam 기본값)
+      const scenarioId = currentScenario.backendId || "loan_scam";
+      await websocket.connect(scenarioId, "voice");
+      navigation.navigate("Call", { callType: "voice" });
+    } catch (error) {
+      console.error("WebSocket 연결 실패:", error);
+      Alert.alert(
+        "연결 실패",
+        "시뮬레이션 서버에 연결할 수 없습니다.\n로그인 상태를 확인해주세요."
+      );
+    } finally {
+      setConnecting(false);
+    }
   };
 
-  const handleStartMessage = () => {
-    navigation.navigate("Call", { callType: "message" });
+  const handleStartMessage = async () => {
+    setConnecting(true);
+    try {
+      const scenarioId = currentScenario.backendId || "loan_scam";
+      await websocket.connect(scenarioId, "text");
+      navigation.navigate("Call", { callType: "message" });
+    } catch (error) {
+      console.error("WebSocket 연결 실패:", error);
+      Alert.alert(
+        "연결 실패",
+        "시뮬레이션 서버에 연결할 수 없습니다.\n로그인 상태를 확인해주세요."
+      );
+    } finally {
+      setConnecting(false);
+    }
   };
 
   return (
@@ -63,17 +95,24 @@ export default function CallSetupScreen({ navigation }) {
 
           {/* 전화 시뮬레이션 */}
           <TouchableOpacity
-            style={styles.methodButton}
+            style={[styles.methodButton, connecting && styles.methodButtonDisabled]}
             activeOpacity={0.8}
             onPress={handleStartCall}
+            disabled={connecting}
           >
             <View style={styles.methodContent}>
               <View style={styles.methodLeft}>
                 <View style={styles.iconCircle}>
-                  <Ionicons name="call" size={24} color={colors.white} />
+                  {connecting ? (
+                    <ActivityIndicator color={colors.white} />
+                  ) : (
+                    <Ionicons name="call" size={24} color={colors.white} />
+                  )}
                 </View>
                 <View style={styles.methodInfo}>
-                  <Text style={styles.methodTitle}>전화 시뮬레이션</Text>
+                  <Text style={styles.methodTitle}>
+                    {connecting ? "연결 중..." : "전화 시뮬레이션"}
+                  </Text>
                   <Text style={styles.methodDescription}>
                     실제 통화처럼 음성으로 진행됩니다
                   </Text>
@@ -199,6 +238,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
+  },
+  methodButtonDisabled: {
+    opacity: 0.7,
   },
   methodButtonSecondary: {
     backgroundColor: colors.slate800,

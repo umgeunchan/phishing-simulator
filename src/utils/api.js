@@ -71,12 +71,15 @@ export const api = {
     // age를 정수로 변환
     const ageNumber = typeof age === "string" ? parseInt(age, 10) : age;
 
+    // 백엔드 API 스펙에 맞춰 profile 객체로 중첩
     const requestBody = {
       username,
       password,
-      name,
-      age: ageNumber,
-      gender,
+      profile: {
+        name,
+        age: ageNumber,
+        gender,
+      },
     };
 
     console.log("📤 회원가입 요청 데이터:", requestBody);

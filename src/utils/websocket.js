@@ -28,6 +28,7 @@ class WebSocketService {
         this.ws.onopen = () => {
           console.log("✅ WebSocket 연결됨");
           this.isConnected = true;
+          // 백엔드가 먼저 초기 메시지를 보내므로 클라이언트에서는 별도 init 불필요
           resolve();
         };
 
@@ -51,8 +52,12 @@ class WebSocketService {
           reject(error);
         };
 
-        this.ws.onclose = () => {
-          console.log("🔌 WebSocket 연결 종료");
+        this.ws.onclose = (event) => {
+          console.log("🔌 WebSocket 연결 종료:", {
+            code: event.code,
+            reason: event.reason,
+            wasClean: event.wasClean,
+          });
           this.isConnected = false;
         };
       } catch (error) {
