@@ -9,7 +9,13 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        },
+        "NSMicrophoneUsageDescription": "음성 시뮬레이션을 위해 마이크 접근이 필요합니다."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -19,7 +25,9 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": ["RECORD_AUDIO"],
+      "usesCleartextTraffic": true
     },
     "web": {
       "output": "static",

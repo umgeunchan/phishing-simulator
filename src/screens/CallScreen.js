@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-av";
-import * as FileSystem from "expo-file-system";
+import { readAsStringAsync, writeAsStringAsync, cacheDirectory, EncodingType } from "expo-file-system";
 import { useEffect, useState, useRef } from "react";
 import {
   Modal,
@@ -26,6 +26,10 @@ export default function CallScreen({ navigation, route }) {
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState("");
   const [simulationResult, setSimulationResult] = useState(null);
+  const [isConnecting, setIsConnecting] = useState(true);
+  const [connectionError, setConnectionError] = useState(null);
+  const [waitingForInitialMessage, setWaitingForInitialMessage] =
+    useState(true);
   const scrollViewRef = useRef(null);
 
   // 음성 통화 관련 상태
@@ -130,8 +134,8 @@ export default function CallScreen({ navigation, route }) {
 
       if (uri) {
         // 오디오 파일을 base64로 인코딩하여 전송
-        const base64Audio = await FileSystem.readAsStringAsync(uri, {
-          encoding: FileSystem.EncodingType.Base64,
+        const base64Audio = await readAsStringAsync(uri, {
+          encoding: EncodingType.Base64,
         });
 
         // WebSocket으로 오디오 데이터 전송
@@ -155,9 +159,9 @@ export default function CallScreen({ navigation, route }) {
       setIsPlaying(true);
 
       // base64 오디오 데이터를 파일로 저장
-      const fileUri = FileSystem.cacheDirectory + "ai_response.mp3";
-      await FileSystem.writeAsStringAsync(fileUri, audioData, {
-        encoding: FileSystem.EncodingType.Base64,
+      const fileUri = cacheDirectory + "ai_response.mp3";
+      await writeAsStringAsync(fileUri, audioData, {
+        encoding: EncodingType.Base64,
       });
 
       // 오디오 재생
@@ -186,36 +190,70 @@ export default function CallScreen({ navigation, route }) {
     }
   };
 
-  // WebSocket 메시지 수신
+  // WebSocket 연결 및 메시지 수신
   useEffect(() => {
     const handleMessage = (message) => {
       console.log("📩 수신된 메시지:", message);
 
-      if (message.type === "audio_response" && message.audio) {
-        // AI 음성 응답
-        playAudioResponse(message.audio);
-      } else if (message.type === "ai_message" || message.text) {
-        // AI 텍스트 응답 메시지
+      // 첫 메시지를 받으면 로딩 상태 해제
+      setWaitingForInitialMessage(false);
+
+      // 백엔드는 단순 텍스트 문자열을 보냄
+      // websocket.js에서 { text: event.data } 형식으로 래핑함
+      const textContent = message.text || message;
+
+      if (typeof textContent === "string") {
+        // 텍스트 메시지를 AI 메시지로 표시
         setMessages((prev) => [
           ...prev,
           {
             type: "ai",
-            text: message.text || message.content,
+            text: textContent,
             timestamp: new Date(),
           },
         ]);
+      } else if (message.type === "audio_response" && message.audio) {
+        // AI 음성 응답 (향후 음성 모드용)
+        playAudioResponse(message.audio);
       } else if (message.type === "simulation_end" || message.result) {
         // 시뮬레이션 종료
         setSimulationResult(message.result || message);
       }
     };
 
+    // 핸들러를 먼저 등록
     websocket.onMessage(handleMessage);
+
+    // 이미 연결되어 있지 않으면 새로 연결
+    const connectWebSocket = async () => {
+      if (!websocket.isConnected && currentScenario) {
+        try {
+          const scenarioId = currentScenario.backendId || "loan_scam";
+          const mode = callType === "voice" ? "voice" : "text";
+          console.log("🔌 CallScreen에서 WebSocket 연결 시작:", scenarioId, mode);
+          await websocket.connect(scenarioId, mode);
+          setIsConnecting(false);
+
+          // LLM 초기화 시간을 고려한 타임아웃 (최대 10초)
+          setTimeout(() => {
+            setWaitingForInitialMessage(false);
+          }, 10000);
+        } catch (error) {
+          console.error("WebSocket 연결 실패:", error);
+          setConnectionError(error.message);
+          setIsConnecting(false);
+        }
+      } else {
+        setIsConnecting(false);
+      }
+    };
+
+    connectWebSocket();
 
     return () => {
       websocket.removeMessageHandler(handleMessage);
     };
-  }, []);
+  }, [currentScenario, callType]);
 
   // 시간 포맷팅 (00:00)
   const formatTime = (seconds) => {
@@ -230,18 +268,20 @@ export default function CallScreen({ navigation, route }) {
   const handleSendMessage = () => {
     if (!inputText.trim()) return;
 
+    const messageText = inputText.trim();
+
     // 내 메시지 추가
     setMessages((prev) => [
       ...prev,
       {
         type: "user",
-        text: inputText.trim(),
+        text: messageText,
         timestamp: new Date(),
       },
     ]);
 
-    // WebSocket으로 전송
-    websocket.send({ type: "user_message", text: inputText.trim() });
+    // WebSocket으로 전송 (백엔드는 단순 텍스트를 기대함)
+    websocket.send(messageText);
     setInputText("");
   };
 
@@ -270,29 +310,87 @@ export default function CallScreen({ navigation, route }) {
     return null;
   }
 
+  // 연결 중 화면
+  if (isConnecting) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.connectingContainer}>
+          <Text style={styles.connectingText}>서버에 연결 중...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // 연결 에러 화면
+  if (connectionError) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.connectingContainer}>
+          <Text style={styles.errorText}>연결 실패</Text>
+          <Text style={styles.errorSubText}>{connectionError}</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.retryButtonText}>돌아가기</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
-        {/* 프로필 영역 */}
-        <View style={styles.profileSection}>
-          <View style={styles.avatarCircle}>
-            <Ionicons name="person" size={48} color={colors.slate400} />
-          </View>
+        {/* 프로필 영역 - 문자 시뮬레이션일 때는 작게 표시 */}
+        <View
+          style={[
+            styles.profileSection,
+            callType === "message" && styles.profileSectionCompact,
+          ]}
+        >
+          {callType === "voice" && (
+            <View style={styles.avatarCircle}>
+              <Ionicons name="person" size={48} color={colors.slate400} />
+            </View>
+          )}
 
-          <Text style={styles.callerName}>{currentScenario.callerName}</Text>
-          <Text style={styles.callerNumber}>
-            {currentScenario.callerNumber}
-          </Text>
-
-          {/* 타이머 */}
-          <View style={styles.timerContainer}>
-            <Text style={styles.timer}>{formatTime(callTime)}</Text>
+          <View style={callType === "message" ? styles.profileRow : null}>
+            {callType === "message" && (
+              <View style={styles.avatarCircleSmall}>
+                <Ionicons name="person" size={24} color={colors.slate400} />
+              </View>
+            )}
+            <View style={callType === "message" ? styles.profileInfo : null}>
+              <Text
+                style={[
+                  styles.callerName,
+                  callType === "message" && styles.callerNameSmall,
+                ]}
+              >
+                {currentScenario.callerName}
+              </Text>
+              <Text style={styles.callerNumber}>
+                {currentScenario.callerNumber}
+              </Text>
+            </View>
+            {/* 타이머 */}
+            <View style={styles.timerContainer}>
+              <Text
+                style={[
+                  styles.timer,
+                  callType === "message" && styles.timerSmall,
+                ]}
+              >
+                {formatTime(callTime)}
+              </Text>
+            </View>
           </View>
         </View>
 
         {/* 채팅 영역 (문자 시뮬레이션) */}
         {callType === "message" && (
-          <View style={styles.chatContainer}>
+          <View style={styles.chatContainerFull}>
             <ScrollView
               ref={scrollViewRef}
               style={styles.chatScroll}
@@ -301,6 +399,13 @@ export default function CallScreen({ navigation, route }) {
                 scrollViewRef.current?.scrollToEnd({ animated: true })
               }
             >
+              {waitingForInitialMessage && messages.length === 0 && (
+                <View style={styles.waitingContainer}>
+                  <Text style={styles.waitingText}>
+                    상대방이 입력 중입니다...
+                  </Text>
+                </View>
+              )}
               {messages.map((msg, index) => (
                 <View
                   key={index}
@@ -308,6 +413,8 @@ export default function CallScreen({ navigation, route }) {
                     styles.messageBubble,
                     msg.type === "user"
                       ? styles.userMessage
+                      : msg.type === "system"
+                      ? styles.systemMessage
                       : styles.aiMessage,
                   ]}
                 >
@@ -316,6 +423,8 @@ export default function CallScreen({ navigation, route }) {
                       styles.messageText,
                       msg.type === "user"
                         ? styles.userMessageText
+                        : msg.type === "system"
+                        ? styles.systemMessageText
                         : styles.aiMessageText,
                     ]}
                   >
@@ -345,14 +454,16 @@ export default function CallScreen({ navigation, route }) {
           </View>
         )}
 
-        {/* 경고 메시지 */}
-        <View style={styles.warningBox}>
-          <Ionicons name="alert-circle" size={16} color={colors.yellow500} />
-          <Text style={styles.warningText}>
-            의심스러운 요청에는 응답하지 마세요. 개인정보나 계좌번호를 절대
-            알려주지 마세요.
-          </Text>
-        </View>
+        {/* 경고 메시지 - 음성 모드에서만 표시 */}
+        {callType === "voice" && (
+          <View style={styles.warningBox}>
+            <Ionicons name="alert-circle" size={16} color={colors.yellow500} />
+            <Text style={styles.warningText}>
+              의심스러운 요청에는 응답하지 마세요. 개인정보나 계좌번호를 절대
+              알려주지 마세요.
+            </Text>
+          </View>
+        )}
 
         {/* 음성 통화 컨트롤 */}
         {callType === "voice" && (
@@ -422,35 +533,45 @@ export default function CallScreen({ navigation, route }) {
           </View>
         )}
 
-        {/* 버튼 그룹 (텍스트 모드) */}
+        {/* 버튼 그룹 (텍스트 모드) - 통화 종료 버튼 포함 */}
         {callType === "message" && (
-          <View style={styles.buttonGroup}>
+          <View style={styles.messageBottomSection}>
             <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => setShowMemo(true)}
+              style={styles.actionButtonSmall}
+              onPress={() => setShowHint(true)}
             >
-              <Ionicons name="create-outline" size={24} color={colors.white} />
-              <Text style={styles.actionButtonText}>메모하기</Text>
+              <Ionicons name="bulb-outline" size={20} color={colors.white} />
+              <Text style={styles.actionButtonTextSmall}>힌트</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => setShowHint(true)}
+              style={styles.endCallButtonSmall}
+              onPress={handleEndCall}
             >
-              <Ionicons name="bulb-outline" size={24} color={colors.white} />
-              <Text style={styles.actionButtonText}>힌트 보기</Text>
+              <Ionicons name="call" size={24} color={colors.white} />
+              <Text style={styles.endCallTextSmall}>종료</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.actionButtonSmall}
+              onPress={() => setShowMemo(true)}
+            >
+              <Ionicons name="create-outline" size={20} color={colors.white} />
+              <Text style={styles.actionButtonTextSmall}>메모</Text>
             </TouchableOpacity>
           </View>
         )}
       </View>
 
-      {/* 통화 종료 버튼 */}
-      <View style={styles.bottomSection}>
-        <TouchableOpacity style={styles.endCallButton} onPress={handleEndCall}>
-          <Ionicons name="call" size={28} color={colors.white} />
-        </TouchableOpacity>
-        <Text style={styles.endCallText}>통화 종료</Text>
-      </View>
+      {/* 통화 종료 버튼 - 음성 모드에서만 */}
+      {callType === "voice" && (
+        <View style={styles.bottomSection}>
+          <TouchableOpacity style={styles.endCallButton} onPress={handleEndCall}>
+            <Ionicons name="call" size={28} color={colors.white} />
+          </TouchableOpacity>
+          <Text style={styles.endCallText}>통화 종료</Text>
+        </View>
+      )}
 
       {/* 힌트 모달 */}
       <Modal
@@ -525,15 +646,57 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.slate950,
   },
-  content: {
+  connectingContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     padding: 24,
   },
+  connectingText: {
+    fontSize: 18,
+    color: colors.white,
+  },
+  errorText: {
+    fontSize: 20,
+    fontWeight: "600",
+    color: colors.red600,
+    marginBottom: 8,
+  },
+  errorSubText: {
+    fontSize: 14,
+    color: colors.slate400,
+    textAlign: "center",
+    marginBottom: 24,
+  },
+  content: {
+    flex: 1,
+    alignItems: "center",
+    padding: 16,
+  },
   profileSection: {
     alignItems: "center",
     marginBottom: 32,
+  },
+  profileSectionCompact: {
+    marginBottom: 12,
+    width: "100%",
+  },
+  profileRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    width: "100%",
+    gap: 12,
+  },
+  profileInfo: {
+    flex: 1,
+  },
+  avatarCircleSmall: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.slate800,
+    justifyContent: "center",
+    alignItems: "center",
   },
   avatarCircle: {
     width: 96,
@@ -550,6 +713,10 @@ const styles = StyleSheet.create({
     color: colors.white,
     marginBottom: 8,
   },
+  callerNameSmall: {
+    fontSize: 16,
+    marginBottom: 2,
+  },
   callerNumber: {
     fontSize: 16,
     color: colors.slate400,
@@ -563,6 +730,9 @@ const styles = StyleSheet.create({
     fontWeight: "300",
     color: colors.green500,
     letterSpacing: 2,
+  },
+  timerSmall: {
+    fontSize: 16,
   },
   warningBox: {
     flexDirection: "row",
@@ -613,6 +783,41 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: colors.white,
+  },
+  // 문자 모드 하단 버튼
+  messageBottomSection: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 24,
+    paddingVertical: 12,
+    width: "100%",
+  },
+  actionButtonSmall: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.slate800,
+  },
+  actionButtonTextSmall: {
+    fontSize: 10,
+    color: colors.slate300,
+    marginTop: 2,
+  },
+  endCallButtonSmall: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.red600,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  endCallTextSmall: {
+    fontSize: 10,
+    color: colors.white,
+    marginTop: 2,
   },
   modalOverlay: {
     flex: 1,
@@ -673,6 +878,11 @@ const styles = StyleSheet.create({
     width: "100%",
     marginBottom: 16,
   },
+  chatContainerFull: {
+    flex: 1,
+    width: "100%",
+    marginBottom: 8,
+  },
   chatScroll: {
     flex: 1,
     backgroundColor: colors.slate900,
@@ -681,6 +891,15 @@ const styles = StyleSheet.create({
   chatContent: {
     padding: 12,
     gap: 8,
+  },
+  waitingContainer: {
+    padding: 20,
+    alignItems: "center",
+  },
+  waitingText: {
+    fontSize: 14,
+    color: colors.slate400,
+    fontStyle: "italic",
   },
   messageBubble: {
     maxWidth: "80%",
@@ -695,6 +914,11 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     backgroundColor: colors.slate700,
   },
+  systemMessage: {
+    alignSelf: "center",
+    backgroundColor: colors.yellow900,
+    maxWidth: "90%",
+  },
   messageText: {
     fontSize: 15,
     lineHeight: 20,
@@ -704,6 +928,10 @@ const styles = StyleSheet.create({
   },
   aiMessageText: {
     color: colors.slate300,
+  },
+  systemMessageText: {
+    color: colors.yellow500,
+    textAlign: "center",
   },
   inputContainer: {
     flexDirection: "row",

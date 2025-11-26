@@ -23,33 +23,48 @@ class WebSocketService {
 
         console.log("🔌 WebSocket 연결 시도:", url);
 
+        // 기존 연결이 있으면 정리
+        if (this.ws) {
+          this.ws.onclose = null;
+          this.ws.onerror = null;
+          this.ws.onmessage = null;
+          this.ws.close();
+          this.ws = null;
+        }
+
         this.ws = new WebSocket(url);
+
+        let hasReceivedMessage = false;
 
         this.ws.onopen = () => {
           console.log("✅ WebSocket 연결됨");
           this.isConnected = true;
-          // 백엔드가 먼저 초기 메시지를 보내므로 클라이언트에서는 별도 init 불필요
-          resolve();
+
+          // 백엔드가 초기 메시지를 보낼 때까지 잠깐 대기
+          // LLM 초기화에 시간이 걸릴 수 있으므로 충분한 시간 대기
+          setTimeout(() => {
+            if (!hasReceivedMessage) {
+              console.log("⚠️ 초기 메시지 수신 대기 중...");
+            }
+            resolve();
+          }, 500);
         };
 
         this.ws.onmessage = (event) => {
+          hasReceivedMessage = true;
           console.log("📨 WebSocket 메시지 수신:", event.data);
 
-          try {
-            const message = JSON.parse(event.data);
-            this.messageHandlers.forEach((handler) => handler(message));
-          } catch (error) {
-            console.error("메시지 파싱 에러:", error);
-            // 텍스트 메시지일 수도 있음
-            this.messageHandlers.forEach((handler) =>
-              handler({ text: event.data })
-            );
-          }
+          // 백엔드가 단순 텍스트를 보내므로 텍스트로 처리
+          this.messageHandlers.forEach((handler) =>
+            handler({ text: event.data })
+          );
         };
 
         this.ws.onerror = (error) => {
           console.error("❌ WebSocket 에러:", error);
-          reject(error);
+          if (!this.isConnected) {
+            reject(error);
+          }
         };
 
         this.ws.onclose = (event) => {
@@ -68,13 +83,26 @@ class WebSocketService {
 
   // 메시지 전송
   send(message) {
-    if (this.ws && this.isConnected) {
+    if (!this.ws) {
+      console.error("❌ WebSocket 인스턴스가 없음");
+      return false;
+    }
+
+    if (this.ws.readyState !== WebSocket.OPEN) {
+      console.error("❌ WebSocket이 열려있지 않음");
+      return false;
+    }
+
+    try {
+      // 백엔드가 단순 텍스트를 기대하므로 문자열 그대로 전송
       const data =
         typeof message === "string" ? message : JSON.stringify(message);
       this.ws.send(data);
       console.log("📤 WebSocket 메시지 전송:", data);
-    } else {
-      console.error("WebSocket이 연결되지 않음");
+      return true;
+    } catch (error) {
+      console.error("❌ 메시지 전송 실패:", error);
+      return false;
     }
   }
 
@@ -91,11 +119,12 @@ class WebSocketService {
   // 연결 종료
   disconnect() {
     if (this.ws) {
-      this.ws.close();
+      this.ws.onclose = null;
+      this.ws.close(1000, "사용자 종료");
       this.ws = null;
       this.isConnected = false;
-      this.messageHandlers = [];
     }
+    this.messageHandlers = [];
   }
 }
 
