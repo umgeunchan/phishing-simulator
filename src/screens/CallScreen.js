@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-av";
-import { readAsStringAsync, writeAsStringAsync, cacheDirectory, EncodingType } from "expo-file-system";
+import * as FileSystem from "expo-file-system";
 import { useEffect, useState, useRef } from "react";
 import {
   Modal,
@@ -134,8 +134,8 @@ export default function CallScreen({ navigation, route }) {
 
       if (uri) {
         // 오디오 파일을 base64로 인코딩하여 전송
-        const base64Audio = await readAsStringAsync(uri, {
-          encoding: EncodingType.Base64,
+        const base64Audio = await FileSystem.readAsStringAsync(uri, {
+          encoding: FileSystem.EncodingType.Base64,
         });
 
         // WebSocket으로 오디오 데이터 전송
@@ -159,9 +159,9 @@ export default function CallScreen({ navigation, route }) {
       setIsPlaying(true);
 
       // base64 오디오 데이터를 파일로 저장
-      const fileUri = cacheDirectory + "ai_response.mp3";
-      await writeAsStringAsync(fileUri, audioData, {
-        encoding: EncodingType.Base64,
+      const fileUri = FileSystem.cacheDirectory + "ai_response.mp3";
+      await FileSystem.writeAsStringAsync(fileUri, audioData, {
+        encoding: FileSystem.EncodingType.Base64,
       });
 
       // 오디오 재생
