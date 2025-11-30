@@ -7,6 +7,9 @@ class WebSocketService {
     this.ws = null;
     this.messageHandlers = [];
     this.isConnected = false;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 3;
+    this.reconnectDelay = 2000; // 2초
   }
 
   // WebSocket 연결
@@ -39,6 +42,7 @@ class WebSocketService {
         this.ws.onopen = () => {
           console.log("✅ WebSocket 연결됨");
           this.isConnected = true;
+          this.reconnectAttempts = 0; // 연결 성공 시 재시도 카운터 리셋
 
           // 백엔드가 초기 메시지를 보낼 때까지 잠깐 대기
           // LLM 초기화에 시간이 걸릴 수 있으므로 충분한 시간 대기
@@ -52,12 +56,32 @@ class WebSocketService {
 
         this.ws.onmessage = (event) => {
           hasReceivedMessage = true;
-          console.log("📨 WebSocket 메시지 수신:", event.data);
 
-          // 백엔드가 단순 텍스트를 보내므로 텍스트로 처리
-          this.messageHandlers.forEach((handler) =>
-            handler({ text: event.data })
-          );
+          // 바이너리 데이터인 경우 (음성 모드)
+          if (event.data instanceof ArrayBuffer || event.data instanceof Blob) {
+            console.log("📨 WebSocket 바이너리 수신:", event.data.byteLength || event.data.size, "bytes");
+
+            // Blob인 경우 ArrayBuffer로 변환
+            if (event.data instanceof Blob) {
+              const reader = new FileReader();
+              reader.onload = () => {
+                this.messageHandlers.forEach((handler) =>
+                  handler({ type: "audio_response", audio: reader.result })
+                );
+              };
+              reader.readAsArrayBuffer(event.data);
+            } else {
+              this.messageHandlers.forEach((handler) =>
+                handler({ type: "audio_response", audio: event.data })
+              );
+            }
+          } else {
+            // 텍스트 메시지 (초기 메시지 또는 텍스트 모드)
+            console.log("📨 WebSocket 메시지 수신:", event.data);
+            this.messageHandlers.forEach((handler) =>
+              handler({ text: event.data })
+            );
+          }
         };
 
         this.ws.onerror = (error) => {
@@ -74,6 +98,19 @@ class WebSocketService {
             wasClean: event.wasClean,
           });
           this.isConnected = false;
+
+          // 비정상 종료이고 재연결 시도 가능한 경우
+          if (!event.wasClean && this.reconnectAttempts < this.maxReconnectAttempts) {
+            this.reconnectAttempts++;
+            console.log(`🔄 재연결 시도 ${this.reconnectAttempts}/${this.maxReconnectAttempts}...`);
+            setTimeout(() => {
+              if (!this.isConnected) {
+                this.connect(scenario, mode).catch((err) => {
+                  console.error("재연결 실패:", err);
+                });
+              }
+            }, this.reconnectDelay);
+          }
         };
       } catch (error) {
         reject(error);
@@ -81,7 +118,7 @@ class WebSocketService {
     });
   }
 
-  // 메시지 전송
+  // 메시지 전송 (텍스트)
   send(message) {
     if (!this.ws) {
       console.error("❌ WebSocket 인스턴스가 없음");
@@ -106,6 +143,28 @@ class WebSocketService {
     }
   }
 
+  // 바이너리 데이터 전송 (음성 모드)
+  sendBinary(arrayBuffer) {
+    if (!this.ws) {
+      console.error("❌ WebSocket 인스턴스가 없음");
+      return false;
+    }
+
+    if (this.ws.readyState !== WebSocket.OPEN) {
+      console.error("❌ WebSocket이 열려있지 않음");
+      return false;
+    }
+
+    try {
+      this.ws.send(arrayBuffer);
+      console.log("📤 WebSocket 바이너리 전송:", arrayBuffer.byteLength, "bytes");
+      return true;
+    } catch (error) {
+      console.error("❌ 바이너리 전송 실패:", error);
+      return false;
+    }
+  }
+
   // 메시지 핸들러 등록
   onMessage(handler) {
     this.messageHandlers.push(handler);
@@ -125,6 +184,7 @@ class WebSocketService {
       this.isConnected = false;
     }
     this.messageHandlers = [];
+    this.reconnectAttempts = 0; // 재연결 카운터 리셋
   }
 }
 

@@ -92,25 +92,25 @@ export default function CallScreen({ navigation, route }) {
       const recording = new Audio.Recording();
       await recording.prepareToRecordAsync({
         android: {
-          extension: ".wav",
-          outputFormat: Audio.AndroidOutputFormat.DEFAULT,
-          audioEncoder: Audio.AndroidAudioEncoder.DEFAULT,
+          extension: ".m4a",
+          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+          audioEncoder: Audio.AndroidAudioEncoder.AAC,
           sampleRate: 16000,
           numberOfChannels: 1,
           bitRate: 128000,
         },
         ios: {
-          extension: ".wav",
-          outputFormat: Audio.IOSOutputFormat.LINEARPCM,
+          extension: ".m4a",
+          outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
           audioQuality: Audio.IOSAudioQuality.HIGH,
           sampleRate: 16000,
           numberOfChannels: 1,
           bitRate: 128000,
-          linearPCMBitDepth: 16,
-          linearPCMIsBigEndian: false,
-          linearPCMIsFloat: false,
         },
-        web: {},
+        web: {
+          mimeType: "audio/webm;codecs=opus",
+          bitsPerSecond: 128000,
+        },
       });
 
       await recording.startAsync();
@@ -133,18 +133,21 @@ export default function CallScreen({ navigation, route }) {
       console.log("🎙️ 녹음 완료:", uri);
 
       if (uri) {
-        // 오디오 파일을 base64로 인코딩하여 전송
-        const base64Audio = await FileSystem.readAsStringAsync(uri, {
+        // 오디오 파일을 바이너리로 읽어서 전송
+        const audioData = await FileSystem.readAsStringAsync(uri, {
           encoding: FileSystem.EncodingType.Base64,
         });
 
-        // WebSocket으로 오디오 데이터 전송
-        websocket.send({
-          type: "audio",
-          audio: base64Audio,
-          format: "wav",
-        });
-        console.log("📤 오디오 전송 완료");
+        // Base64를 ArrayBuffer로 변환
+        const binaryString = atob(audioData);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+
+        // WebSocket으로 바이너리 데이터 전송
+        websocket.sendBinary(bytes.buffer);
+        console.log("📤 오디오 전송 완료:", bytes.length, "bytes");
       }
 
       recordingRef.current = null;
@@ -158,9 +161,17 @@ export default function CallScreen({ navigation, route }) {
     try {
       setIsPlaying(true);
 
-      // base64 오디오 데이터를 파일로 저장
+      // ArrayBuffer를 Base64로 변환
+      const bytes = new Uint8Array(audioData);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const base64Audio = btoa(binary);
+
+      // Base64 오디오 데이터를 파일로 저장
       const fileUri = FileSystem.cacheDirectory + "ai_response.mp3";
-      await FileSystem.writeAsStringAsync(fileUri, audioData, {
+      await FileSystem.writeAsStringAsync(fileUri, base64Audio, {
         encoding: FileSystem.EncodingType.Base64,
       });
 
@@ -203,6 +214,25 @@ export default function CallScreen({ navigation, route }) {
       const textContent = message.text || message;
 
       if (typeof textContent === "string") {
+        // 에러 메시지 확인 (JSON 형식일 수 있음)
+        try {
+          const parsed = JSON.parse(textContent);
+          if (parsed.error) {
+            // 서버 에러를 시스템 메시지로 표시
+            setMessages((prev) => [
+              ...prev,
+              {
+                type: "system",
+                text: `⚠️ 서버 오류: ${parsed.error}\n잠시 후 다시 시도해주세요.`,
+                timestamp: new Date(),
+              },
+            ]);
+            return;
+          }
+        } catch (e) {
+          // JSON 파싱 실패 = 일반 텍스트
+        }
+
         // 텍스트 메시지를 AI 메시지로 표시
         setMessages((prev) => [
           ...prev,
@@ -213,7 +243,7 @@ export default function CallScreen({ navigation, route }) {
           },
         ]);
       } else if (message.type === "audio_response" && message.audio) {
-        // AI 음성 응답 (향후 음성 모드용)
+        // AI 음성 응답 (음성 모드)
         playAudioResponse(message.audio);
       } else if (message.type === "simulation_end" || message.result) {
         // 시뮬레이션 종료
@@ -234,13 +264,25 @@ export default function CallScreen({ navigation, route }) {
           await websocket.connect(scenarioId, mode);
           setIsConnecting(false);
 
-          // LLM 초기화 시간을 고려한 타임아웃 (최대 10초)
+          // LLM 초기화 시간을 고려한 타임아웃 (최대 15초)
           setTimeout(() => {
+            if (waitingForInitialMessage && messages.length === 0) {
+              // 초기 메시지를 받지 못한 경우 안내 메시지 표시
+              setMessages([
+                {
+                  type: "system",
+                  text: "⚠️ 서버 응답이 지연되고 있습니다.\n백엔드 서버와 AI 서버가 정상 작동 중인지 확인해주세요.",
+                  timestamp: new Date(),
+                },
+              ]);
+            }
             setWaitingForInitialMessage(false);
-          }, 10000);
+          }, 15000);
         } catch (error) {
           console.error("WebSocket 연결 실패:", error);
-          setConnectionError(error.message);
+          setConnectionError(
+            error.message || "서버에 연결할 수 없습니다. 네트워크 상태를 확인해주세요."
+          );
           setIsConnecting(false);
         }
       } else {
@@ -290,14 +332,19 @@ export default function CallScreen({ navigation, route }) {
     // WebSocket 연결 종료
     websocket.disconnect();
 
-    // 결과 저장
+    // 결과 저장 - timestamp를 문자열로 변환
+    const serializedMessages = messages.map((msg) => ({
+      ...msg,
+      timestamp: msg.timestamp?.toISOString() || new Date().toISOString(),
+    }));
+
     const result = {
       scenarioName: currentScenario.name,
       success: simulationResult?.success ?? (callTime > 30), // 30초 이상이면 성공으로 간주
       date: new Date().toLocaleString("ko-KR"),
       duration: callTime,
       callType: callType,
-      messages: messages,
+      messages: serializedMessages,
     };
 
     saveTrainingResult(result);
