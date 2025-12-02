@@ -1,9 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import {
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -133,21 +135,30 @@ export default function CallScreen({ navigation, route }) {
       console.log("🎙️ 녹음 완료:", uri);
 
       if (uri) {
-        // 오디오 파일을 바이너리로 읽어서 전송
-        const audioData = await FileSystem.readAsStringAsync(uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
+        if (Platform.OS === "web") {
+          // 웹에서는 fetch로 Blob 가져오기
+          const response = await fetch(uri);
+          const blob = await response.blob();
+          const arrayBuffer = await blob.arrayBuffer();
 
-        // Base64를 ArrayBuffer로 변환
-        const binaryString = atob(audioData);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
+          websocket.sendBinary(arrayBuffer);
+          console.log("📤 오디오 전송 완료 (Web):", arrayBuffer.byteLength, "bytes");
+        } else {
+          // 모바일에서는 FileSystem 사용
+          const audioData = await FileSystem.readAsStringAsync(uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+
+          // Base64를 ArrayBuffer로 변환
+          const binaryString = atob(audioData);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+
+          websocket.sendBinary(bytes.buffer);
+          console.log("📤 오디오 전송 완료 (Mobile):", bytes.length, "bytes");
         }
-
-        // WebSocket으로 바이너리 데이터 전송
-        websocket.sendBinary(bytes.buffer);
-        console.log("📤 오디오 전송 완료:", bytes.length, "bytes");
       }
 
       recordingRef.current = null;
@@ -156,37 +167,108 @@ export default function CallScreen({ navigation, route }) {
     }
   };
 
+  // LINEAR16 PCM을 WAV 파일로 변환하는 헬퍼 함수
+  const createWavBlob = (pcmData, sampleRate = 16000) => {
+    const numChannels = 1; // 모노
+    const bitsPerSample = 16;
+    const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
+    const blockAlign = (numChannels * bitsPerSample) / 8;
+    const dataSize = pcmData.byteLength;
+
+    // WAV 헤더 생성
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer);
+
+    // RIFF chunk descriptor
+    writeString(view, 0, "RIFF");
+    view.setUint32(4, 36 + dataSize, true);
+    writeString(view, 8, "WAVE");
+
+    // fmt sub-chunk
+    writeString(view, 12, "fmt ");
+    view.setUint32(16, 16, true); // fmt chunk size
+    view.setUint16(20, 1, true); // PCM format
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitsPerSample, true);
+
+    // data sub-chunk
+    writeString(view, 36, "data");
+    view.setUint32(40, dataSize, true);
+
+    // PCM 데이터 복사
+    const pcmView = new Uint8Array(pcmData);
+    const wavView = new Uint8Array(buffer);
+    wavView.set(pcmView, 44);
+
+    return new Blob([buffer], { type: "audio/wav" });
+  };
+
+  const writeString = (view, offset, string) => {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
+  };
+
   // AI 오디오 응답 재생
   const playAudioResponse = async (audioData) => {
     try {
+      console.log("🔊 오디오 재생 시작, 데이터 타입:", typeof audioData, "길이:", audioData?.byteLength || audioData?.length);
+
+      // 빈 데이터 체크
+      if (!audioData || (audioData.byteLength === 0 && audioData.length === 0)) {
+        console.warn("⚠️ 빈 오디오 데이터 수신");
+        return;
+      }
+
       setIsPlaying(true);
 
-      // ArrayBuffer를 Base64로 변환
-      const bytes = new Uint8Array(audioData);
-      let binary = '';
-      for (let i = 0; i < bytes.length; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      const base64Audio = btoa(binary);
+      if (Platform.OS === "web") {
+        // 웹에서는 LINEAR16 PCM을 WAV로 변환 후 재생
+        const wavBlob = createWavBlob(audioData, 16000);
+        const blobUrl = URL.createObjectURL(wavBlob);
 
-      // Base64 오디오 데이터를 파일로 저장
-      const fileUri = FileSystem.cacheDirectory + "ai_response.mp3";
-      await FileSystem.writeAsStringAsync(fileUri, base64Audio, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      // 오디오 재생
-      const { sound } = await Audio.Sound.createAsync({ uri: fileUri });
-      soundRef.current = sound;
-
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.didJustFinish) {
+        const audio = new Audio(blobUrl);
+        audio.onended = () => {
           setIsPlaying(false);
-        }
-      });
+          URL.revokeObjectURL(blobUrl);
+        };
+        audio.onerror = (e) => {
+          console.error("웹 오디오 재생 에러:", e);
+          setIsPlaying(false);
+          URL.revokeObjectURL(blobUrl);
+        };
 
-      await sound.playAsync();
-      console.log("🔊 AI 응답 재생 중");
+        await audio.play();
+        console.log("🔊 AI 응답 재생 중 (Web)");
+      } else {
+        // 모바일에서는 Expo Audio 사용
+        const bytes = new Uint8Array(audioData);
+        let binary = "";
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const base64Audio = btoa(binary);
+
+        const fileUri = FileSystem.cacheDirectory + "ai_response.mp3";
+        await FileSystem.writeAsStringAsync(fileUri, base64Audio, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        const { sound } = await Audio.Sound.createAsync({ uri: fileUri });
+        soundRef.current = sound;
+
+        sound.setOnPlaybackStatusUpdate((status) => {
+          if (status.didJustFinish) {
+            setIsPlaying(false);
+          }
+        });
+
+        await sound.playAsync();
+        console.log("🔊 AI 응답 재생 중 (Mobile)");
+      }
     } catch (error) {
       console.error("오디오 재생 실패:", error);
       setIsPlaying(false);
@@ -201,61 +283,68 @@ export default function CallScreen({ navigation, route }) {
     }
   };
 
+  // WebSocket 메시지 핸들러 (useCallback으로 안정적인 참조 유지)
+  const handleMessage = useCallback((message) => {
+    console.log("📩 수신된 메시지:", message);
+
+    // 백엔드는 단순 텍스트 문자열을 보냄
+    // websocket.js에서 { text: event.data } 형식으로 래핑함
+    const textContent = message.text || message;
+
+    if (typeof textContent === "string") {
+      // 백엔드 초기 연결 메시지 필터링 (예: "Start Scenario...")
+      if (textContent.startsWith("Start Secnario") || textContent.startsWith("Start Scenario")) {
+        console.log("📌 백엔드 초기 연결 메시지 수신:", textContent);
+        // 첫 메시지를 받으면 로딩 상태 해제
+        setWaitingForInitialMessage(false);
+        return; // UI에 표시하지 않음
+      }
+    }
+
+    // 실제 메시지를 받으면 로딩 상태 해제
+    setWaitingForInitialMessage(false);
+
+    if (typeof textContent === "string") {
+
+      // 에러 메시지 확인 (JSON 형식일 수 있음)
+      try {
+        const parsed = JSON.parse(textContent);
+        if (parsed.error) {
+          // 서버 에러를 시스템 메시지로 표시
+          setMessages((prev) => [
+            ...prev,
+            {
+              type: "system",
+              text: `⚠️ 서버 오류: ${parsed.error}\n잠시 후 다시 시도해주세요.`,
+              timestamp: new Date(),
+            },
+          ]);
+          return;
+        }
+      } catch (e) {
+        // JSON 파싱 실패 = 일반 텍스트
+      }
+
+      // 텍스트 메시지를 AI 메시지로 표시
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: "ai",
+          text: textContent,
+          timestamp: new Date(),
+        },
+      ]);
+    } else if (message.type === "audio_response" && message.audio) {
+      // AI 음성 응답 (음성 모드)
+      playAudioResponse(message.audio);
+    } else if (message.type === "simulation_end" || message.result) {
+      // 시뮬레이션 종료
+      setSimulationResult(message.result || message);
+    }
+  }, []); // 빈 의존성 배열: setMessages는 함수형 업데이트를 사용하므로 의존성 불필요
+
   // WebSocket 연결 및 메시지 수신
   useEffect(() => {
-    const handleMessage = (message) => {
-      console.log("📩 수신된 메시지:", message);
-
-      // 첫 메시지를 받으면 로딩 상태 해제
-      setWaitingForInitialMessage(false);
-
-      // 백엔드는 단순 텍스트 문자열을 보냄
-      // websocket.js에서 { text: event.data } 형식으로 래핑함
-      const textContent = message.text || message;
-
-      if (typeof textContent === "string") {
-        // 백엔드 초기 연결 메시지 필터링 (예: "Start Scenario...")
-        if (textContent.startsWith("Start Secnario") || textContent.startsWith("Start Scenario")) {
-          console.log("📌 백엔드 초기 연결 메시지 수신:", textContent);
-          return; // UI에 표시하지 않음
-        }
-
-        // 에러 메시지 확인 (JSON 형식일 수 있음)
-        try {
-          const parsed = JSON.parse(textContent);
-          if (parsed.error) {
-            // 서버 에러를 시스템 메시지로 표시
-            setMessages((prev) => [
-              ...prev,
-              {
-                type: "system",
-                text: `⚠️ 서버 오류: ${parsed.error}\n잠시 후 다시 시도해주세요.`,
-                timestamp: new Date(),
-              },
-            ]);
-            return;
-          }
-        } catch (e) {
-          // JSON 파싱 실패 = 일반 텍스트
-        }
-
-        // 텍스트 메시지를 AI 메시지로 표시
-        setMessages((prev) => [
-          ...prev,
-          {
-            type: "ai",
-            text: textContent,
-            timestamp: new Date(),
-          },
-        ]);
-      } else if (message.type === "audio_response" && message.audio) {
-        // AI 음성 응답 (음성 모드)
-        playAudioResponse(message.audio);
-      } else if (message.type === "simulation_end" || message.result) {
-        // 시뮬레이션 종료
-        setSimulationResult(message.result || message);
-      }
-    };
 
     // 핸들러를 먼저 등록
     websocket.onMessage(handleMessage);
@@ -279,21 +368,6 @@ export default function CallScreen({ navigation, route }) {
         console.log("🔌 CallScreen에서 WebSocket 연결 시작:", scenarioId, mode);
         await websocket.connect(scenarioId, mode);
         setIsConnecting(false);
-
-        // LLM 초기화 시간을 고려한 타임아웃 (최대 15초)
-        setTimeout(() => {
-          if (waitingForInitialMessage && messages.length === 0) {
-            // 초기 메시지를 받지 못한 경우 안내 메시지 표시
-            setMessages([
-              {
-                type: "system",
-                text: "⚠️ 서버 응답이 지연되고 있습니다.\n백엔드 서버와 AI 서버가 정상 작동 중인지 확인해주세요.",
-                timestamp: new Date(),
-              },
-            ]);
-          }
-          setWaitingForInitialMessage(false);
-        }, 15000);
       } catch (error) {
         console.error("WebSocket 연결 실패:", error);
         setConnectionError(
@@ -308,10 +382,10 @@ export default function CallScreen({ navigation, route }) {
     return () => {
       // 컴포넌트 언마운트 시 WebSocket 연결 정리
       websocket.removeMessageHandler(handleMessage);
-      websocket.disconnect();
+      websocket.disconnect(true); // 핸들러 배열도 초기화
       console.log("🧹 CallScreen 언마운트: WebSocket 연결 정리 완료");
     };
-  }, [currentScenario, callType]);
+  }, [currentScenario, callType, handleMessage]);
 
   // 시간 포맷팅 (00:00)
   const formatTime = (seconds) => {
@@ -453,7 +527,11 @@ export default function CallScreen({ navigation, route }) {
 
         {/* 채팅 영역 (문자 시뮬레이션) */}
         {callType === "message" && (
-          <View style={styles.chatContainerFull}>
+          <KeyboardAvoidingView
+            style={styles.chatContainerFull}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+          >
             <ScrollView
               ref={scrollViewRef}
               style={styles.chatScroll}
@@ -461,6 +539,7 @@ export default function CallScreen({ navigation, route }) {
               onContentSizeChange={() =>
                 scrollViewRef.current?.scrollToEnd({ animated: true })
               }
+              keyboardShouldPersistTaps="handled"
             >
               {waitingForInitialMessage && messages.length === 0 && (
                 <View style={styles.waitingContainer}>
@@ -506,6 +585,7 @@ export default function CallScreen({ navigation, route }) {
                 placeholder="메시지를 입력하세요..."
                 placeholderTextColor={colors.slate400}
                 multiline
+                maxLength={500}
               />
               <TouchableOpacity
                 style={styles.sendButton}
@@ -514,7 +594,7 @@ export default function CallScreen({ navigation, route }) {
                 <Ionicons name="send" size={20} color={colors.white} />
               </TouchableOpacity>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         )}
 
         {/* 경고 메시지 - 음성 모드에서만 표시 */}

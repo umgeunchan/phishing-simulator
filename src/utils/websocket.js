@@ -37,6 +37,9 @@ class WebSocketService {
 
         this.ws = new WebSocket(url);
 
+        // 바이너리 데이터를 ArrayBuffer로 받기 위해 설정
+        this.ws.binaryType = "arraybuffer";
+
         let hasReceivedMessage = false;
 
         // 연결 타임아웃 설정 (10초)
@@ -203,15 +206,18 @@ class WebSocketService {
   }
 
   // 연결 종료
-  disconnect() {
+  disconnect(clearHandlers = false) {
     if (this.ws) {
       this.ws.onclose = null;
       this.ws.close(1000, "사용자 종료");
       this.ws = null;
       this.isConnected = false;
     }
-    this.messageHandlers = [];
-    this.reconnectAttempts = 0; // 재연결 카운터 리셋
+    this.reconnectAttempts = 0;
+    // clearHandlers가 true일 때만 핸들러 초기화 (컴포넌트 언마운트 시)
+    if (clearHandlers) {
+      this.messageHandlers = [];
+    }
   }
 }
 
