@@ -39,8 +39,17 @@ class WebSocketService {
 
         let hasReceivedMessage = false;
 
+        // 연결 타임아웃 설정 (10초)
+        const connectionTimeout = setTimeout(() => {
+          if (!this.isConnected) {
+            this.ws.close();
+            reject(new Error("WebSocket 연결 시간 초과. 서버가 응답하지 않습니다."));
+          }
+        }, 10000);
+
         this.ws.onopen = () => {
           console.log("✅ WebSocket 연결됨");
+          clearTimeout(connectionTimeout); // 타임아웃 해제
           this.isConnected = true;
           this.reconnectAttempts = 0; // 연결 성공 시 재시도 카운터 리셋
 
@@ -86,8 +95,11 @@ class WebSocketService {
 
         this.ws.onerror = (error) => {
           console.error("❌ WebSocket 에러:", error);
+          const errorMessage = new Error(
+            "WebSocket 연결 중 오류가 발생했습니다. 서버 상태를 확인해주세요."
+          );
           if (!this.isConnected) {
-            reject(error);
+            reject(errorMessage);
           }
         };
 

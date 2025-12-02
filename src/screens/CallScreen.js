@@ -214,6 +214,12 @@ export default function CallScreen({ navigation, route }) {
       const textContent = message.text || message;
 
       if (typeof textContent === "string") {
+        // 백엔드 초기 연결 메시지 필터링 (예: "Start Scenario...")
+        if (textContent.startsWith("Start Secnario") || textContent.startsWith("Start Scenario")) {
+          console.log("📌 백엔드 초기 연결 메시지 수신:", textContent);
+          return; // UI에 표시하지 않음
+        }
+
         // 에러 메시지 확인 (JSON 형식일 수 있음)
         try {
           const parsed = JSON.parse(textContent);
@@ -254,38 +260,45 @@ export default function CallScreen({ navigation, route }) {
     // 핸들러를 먼저 등록
     websocket.onMessage(handleMessage);
 
-    // 이미 연결되어 있지 않으면 새로 연결
+    // 새로운 시나리오로 연결 (기존 연결이 있으면 먼저 종료)
     const connectWebSocket = async () => {
-      if (!websocket.isConnected && currentScenario) {
-        try {
-          const scenarioId = currentScenario.backendId || "loan_scam";
-          const mode = callType === "voice" ? "voice" : "text";
-          console.log("🔌 CallScreen에서 WebSocket 연결 시작:", scenarioId, mode);
-          await websocket.connect(scenarioId, mode);
-          setIsConnecting(false);
+      if (!currentScenario) {
+        setIsConnecting(false);
+        return;
+      }
 
-          // LLM 초기화 시간을 고려한 타임아웃 (최대 15초)
-          setTimeout(() => {
-            if (waitingForInitialMessage && messages.length === 0) {
-              // 초기 메시지를 받지 못한 경우 안내 메시지 표시
-              setMessages([
-                {
-                  type: "system",
-                  text: "⚠️ 서버 응답이 지연되고 있습니다.\n백엔드 서버와 AI 서버가 정상 작동 중인지 확인해주세요.",
-                  timestamp: new Date(),
-                },
-              ]);
-            }
-            setWaitingForInitialMessage(false);
-          }, 15000);
-        } catch (error) {
-          console.error("WebSocket 연결 실패:", error);
-          setConnectionError(
-            error.message || "서버에 연결할 수 없습니다. 네트워크 상태를 확인해주세요."
-          );
-          setIsConnecting(false);
+      try {
+        // 기존 연결이 있으면 먼저 종료
+        if (websocket.isConnected) {
+          console.log("🔄 기존 WebSocket 연결 종료 후 재연결");
+          websocket.disconnect();
         }
-      } else {
+
+        const scenarioId = currentScenario.backendId || "loan_scam";
+        const mode = callType === "voice" ? "voice" : "text";
+        console.log("🔌 CallScreen에서 WebSocket 연결 시작:", scenarioId, mode);
+        await websocket.connect(scenarioId, mode);
+        setIsConnecting(false);
+
+        // LLM 초기화 시간을 고려한 타임아웃 (최대 15초)
+        setTimeout(() => {
+          if (waitingForInitialMessage && messages.length === 0) {
+            // 초기 메시지를 받지 못한 경우 안내 메시지 표시
+            setMessages([
+              {
+                type: "system",
+                text: "⚠️ 서버 응답이 지연되고 있습니다.\n백엔드 서버와 AI 서버가 정상 작동 중인지 확인해주세요.",
+                timestamp: new Date(),
+              },
+            ]);
+          }
+          setWaitingForInitialMessage(false);
+        }, 15000);
+      } catch (error) {
+        console.error("WebSocket 연결 실패:", error);
+        setConnectionError(
+          error.message || "서버에 연결할 수 없습니다. 네트워크 상태를 확인해주세요."
+        );
         setIsConnecting(false);
       }
     };
@@ -293,7 +306,10 @@ export default function CallScreen({ navigation, route }) {
     connectWebSocket();
 
     return () => {
+      // 컴포넌트 언마운트 시 WebSocket 연결 정리
       websocket.removeMessageHandler(handleMessage);
+      websocket.disconnect();
+      console.log("🧹 CallScreen 언마운트: WebSocket 연결 정리 완료");
     };
   }, [currentScenario, callType]);
 

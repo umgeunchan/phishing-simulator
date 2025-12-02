@@ -36,6 +36,7 @@ const fetchAPI = async (endpoint, options = {}) => {
         ...defaultHeaders,
         ...options.headers,
       },
+      timeout: 10000, // 10초 타임아웃
     });
 
     console.log("📊 응답 상태:", response.status);
@@ -48,19 +49,31 @@ const fetchAPI = async (endpoint, options = {}) => {
       data = JSON.parse(text);
     } catch (e) {
       console.error("JSON 파싱 에러:", e);
+      // 응답이 비어있거나 JSON이 아닌 경우
+      if (!text || text.trim() === "") {
+        throw new Error("서버로부터 빈 응답을 받았습니다");
+      }
       throw new Error("서버 응답을 파싱할 수 없습니다");
     }
 
     if (!response.ok) {
-      throw new Error(
-        data.error || data.message || `HTTP error! status: ${response.status}`
-      );
+      const errorMsg = data.error || data.message || `HTTP error! status: ${response.status}`;
+      throw new Error(errorMsg);
     }
 
     console.log("✅ API 성공:", data);
     return { success: true, data };
   } catch (error) {
     console.error("❌ API 에러:", error.message);
+
+    // 네트워크 에러인 경우
+    if (error.message === "Network request failed" || error.name === "TypeError") {
+      return {
+        success: false,
+        error: "서버에 연결할 수 없습니다. 네트워크 연결을 확인해주세요."
+      };
+    }
+
     return { success: false, error: error.message };
   }
 };
