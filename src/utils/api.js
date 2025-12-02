@@ -30,15 +30,20 @@ const fetchAPI = async (endpoint, options = {}) => {
       hasToken: !!authToken,
     });
 
+    // 타임아웃 구현 (AbortController 사용)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
     const response = await fetch(url, {
       ...options,
       headers: {
         ...defaultHeaders,
         ...options.headers,
       },
-      timeout: 10000, // 10초 타임아웃
+      signal: controller.signal,
     });
 
+    clearTimeout(timeoutId);
     console.log("📊 응답 상태:", response.status);
 
     const text = await response.text();
@@ -65,6 +70,14 @@ const fetchAPI = async (endpoint, options = {}) => {
     return { success: true, data };
   } catch (error) {
     console.error("❌ API 에러:", error.message);
+
+    // 타임아웃 에러인 경우
+    if (error.name === "AbortError") {
+      return {
+        success: false,
+        error: "요청 시간이 초과되었습니다. 다시 시도해주세요."
+      };
+    }
 
     // 네트워크 에러인 경우
     if (error.message === "Network request failed" || error.name === "TypeError") {
