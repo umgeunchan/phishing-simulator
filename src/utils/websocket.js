@@ -22,7 +22,7 @@ class WebSocketService {
           return;
         }
 
-        const url = `${WS_BASE_URL}/ws/simulation?token=${token}&scenario=${scenario}&mode=${mode}`;
+        const url = `${WS_BASE_URL}/ws/simulation`;
 
         console.log("🔌 WebSocket 연결 시도:", url);
 
@@ -53,9 +53,24 @@ class WebSocketService {
           this.isConnected = true;
           this.reconnectAttempts = 0; // 연결 성공 시 재시도 카운터 리셋
 
+          // InitMessage 전송 (백엔드 요구사항)
+          const initData = {
+            type: "init",
+            token: token,
+            scenario: scenario,
+            mode: mode
+          };
+
           // 백엔드가 초기 메시지를 보낼 때까지 잠깐 대기
           // LLM 초기화에 시간이 걸릴 수 있으므로 충분한 시간 대기
           setTimeout(() => {
+            try {
+              this.send(initData);
+              console.log("📤 초기화 메시지 전송:", initData);
+            } catch (e) {
+              console.error("❌ 초기화 메시지 전송 실패:", e);
+            }
+
             if (!hasReceivedMessage) {
               console.log("⚠️ 초기 메시지 수신 대기 중...");
             }
@@ -112,7 +127,7 @@ class WebSocketService {
           this.isConnected = false;
 
           // 비정상 종료이고 재연결 시도 가능한 경우
-          if (!event.wasClean && this.reconnectAttempts < this.maxReconnectAttempts) {
+          if (event.code !== 1000 && !event.wasClean && this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
             console.log(`🔄 재연결 시도 ${this.reconnectAttempts}/${this.maxReconnectAttempts}...`);
             setTimeout(() => {
