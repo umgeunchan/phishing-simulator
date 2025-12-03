@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system";
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
   Modal,
@@ -142,7 +142,11 @@ export default function CallScreen({ navigation, route }) {
           const arrayBuffer = await blob.arrayBuffer();
 
           websocket.sendBinary(arrayBuffer);
-          console.log("📤 오디오 전송 완료 (Web):", arrayBuffer.byteLength, "bytes");
+          console.log(
+            "📤 오디오 전송 완료 (Web):",
+            arrayBuffer.byteLength,
+            "bytes"
+          );
         } else {
           // 모바일에서는 FileSystem 사용
           const audioData = await FileSystem.readAsStringAsync(uri, {
@@ -215,10 +219,18 @@ export default function CallScreen({ navigation, route }) {
   // AI 오디오 응답 재생
   const playAudioResponse = async (audioData) => {
     try {
-      console.log("🔊 오디오 재생 시작, 데이터 타입:", typeof audioData, "길이:", audioData?.byteLength || audioData?.length);
+      console.log(
+        "🔊 오디오 재생 시작, 데이터 타입:",
+        typeof audioData,
+        "길이:",
+        audioData?.byteLength || audioData?.length
+      );
 
       // 빈 데이터 체크
-      if (!audioData || (audioData.byteLength === 0 && audioData.length === 0)) {
+      if (
+        !audioData ||
+        (audioData.byteLength === 0 && audioData.length === 0)
+      ) {
         console.warn("⚠️ 빈 오디오 데이터 수신");
         return;
       }
@@ -293,7 +305,10 @@ export default function CallScreen({ navigation, route }) {
 
     if (typeof textContent === "string") {
       // 백엔드 초기 연결 메시지 필터링 (예: "Start Scenario...")
-      if (textContent.startsWith("Start Secnario") || textContent.startsWith("Start Scenario")) {
+      if (
+        textContent.startsWith("Start Secnario") ||
+        textContent.startsWith("Start Scenario")
+      ) {
         console.log("📌 백엔드 초기 연결 메시지 수신:", textContent);
         // 첫 메시지를 받으면 로딩 상태 해제
         setWaitingForInitialMessage(false);
@@ -305,7 +320,6 @@ export default function CallScreen({ navigation, route }) {
     setWaitingForInitialMessage(false);
 
     if (typeof textContent === "string") {
-
       // 에러 메시지 확인 (JSON 형식일 수 있음)
       try {
         const parsed = JSON.parse(textContent);
@@ -345,7 +359,6 @@ export default function CallScreen({ navigation, route }) {
 
   // WebSocket 연결 및 메시지 수신
   useEffect(() => {
-
     // 핸들러를 먼저 등록
     websocket.onMessage(handleMessage);
 
@@ -371,7 +384,8 @@ export default function CallScreen({ navigation, route }) {
       } catch (error) {
         console.error("WebSocket 연결 실패:", error);
         setConnectionError(
-          error.message || "서버에 연결할 수 없습니다. 네트워크 상태를 확인해주세요."
+          error.message ||
+            "서버에 연결할 수 없습니다. 네트워크 상태를 확인해주세요."
         );
         setIsConnecting(false);
       }
@@ -442,15 +456,17 @@ export default function CallScreen({ navigation, route }) {
       success = simulationResult.success || false;
     } else {
       // 대화 분석 기반 판정
-      const userMessages = serializedMessages.filter(msg => msg.type === "user").length;
+      const userMessages = serializedMessages.filter(
+        (msg) => msg.type === "user"
+      ).length;
 
       // 사용자가 짧게 끊은 경우 (방어 성공)
-      if (callTime < 20 || userMessages < 3) {
+      if (callTime < 30 || userMessages < 3) {
         outcome = "win";
         success = true;
       }
       // 긴 대화가 이어진 경우 (방어 실패 - 피싱에 속고 있음)
-      else if (callTime > 120 || userMessages > 10) {
+      else if (callTime > 100 || userMessages > 6) {
         outcome = "fail";
         success = false;
       }
@@ -655,7 +671,11 @@ export default function CallScreen({ navigation, route }) {
               )}
               {isPlaying && (
                 <>
-                  <Ionicons name="volume-high" size={16} color={colors.green500} />
+                  <Ionicons
+                    name="volume-high"
+                    size={16}
+                    color={colors.green500}
+                  />
                   <Text style={styles.playingText}>AI 응답 재생 중...</Text>
                 </>
               )}
@@ -743,7 +763,10 @@ export default function CallScreen({ navigation, route }) {
       {/* 통화 종료 버튼 - 음성 모드에서만 */}
       {callType === "voice" && (
         <View style={styles.bottomSection}>
-          <TouchableOpacity style={styles.endCallButton} onPress={handleEndCall}>
+          <TouchableOpacity
+            style={styles.endCallButton}
+            onPress={handleEndCall}
+          >
             <Ionicons name="call" size={28} color={colors.white} />
           </TouchableOpacity>
           <Text style={styles.endCallText}>통화 종료</Text>
