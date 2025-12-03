@@ -320,11 +320,46 @@ export default function CallScreen({ navigation, route }) {
     setWaitingForInitialMessage(false);
 
     if (typeof textContent === "string") {
-      // 에러 메시지 확인 (JSON 형식일 수 있음)
+      // JSON 메시지 확인 (결과, 에러 등)
       try {
         const parsed = JSON.parse(textContent);
+
+        // 백엔드 결과 메시지 처리
+        if (parsed.type === "result") {
+          console.log("✅ 백엔드 결과 수신:", parsed);
+
+          // 점수를 기반으로 outcome 결정
+          let outcome = "confusion";
+          if (parsed.score >= 70) {
+            outcome = "win";
+          } else if (parsed.score <= 30) {
+            outcome = "fail";
+          } else {
+            outcome = "confusion";
+          }
+
+          setSimulationResult({
+            score: parsed.score,
+            outcome: outcome,
+            endReason: parsed.end_reason,
+            feedback: parsed.feedback,
+            success: outcome === "win",
+          });
+
+          // 시스템 메시지로 표시 (선택적)
+          setMessages((prev) => [
+            ...prev,
+            {
+              type: "system",
+              text: "✅ 시뮬레이션이 완료되었습니다.",
+              timestamp: new Date(),
+            },
+          ]);
+          return;
+        }
+
+        // 에러 메시지 처리
         if (parsed.error) {
-          // 서버 에러를 시스템 메시지로 표시
           setMessages((prev) => [
             ...prev,
             {
@@ -337,6 +372,19 @@ export default function CallScreen({ navigation, route }) {
         }
       } catch (e) {
         // JSON 파싱 실패 = 일반 텍스트
+      }
+
+      // 시스템 메시지 필터링
+      if (textContent.startsWith("[시스템:")) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            type: "system",
+            text: textContent.replace("[시스템:", "").replace("]", "").trim(),
+            timestamp: new Date(),
+          },
+        ]);
+        return;
       }
 
       // 텍스트 메시지를 AI 메시지로 표시
@@ -485,6 +533,10 @@ export default function CallScreen({ navigation, route }) {
       duration: callTime,
       callType: callType,
       messages: serializedMessages,
+      // 백엔드 결과 데이터 포함
+      backendScore: simulationResult?.score,
+      endReason: simulationResult?.endReason,
+      feedback: simulationResult?.feedback,
     };
 
     saveTrainingResult(result);

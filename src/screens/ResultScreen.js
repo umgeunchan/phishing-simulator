@@ -20,22 +20,23 @@ export default function ResultScreen({ navigation, route }) {
 
   // 결과에서 outcome 기반 점수 계산
   const outcome = result.outcome || (result.success ? "win" : "fail");
-  let score = 50; // 기본값 (confusion)
+
+  // 백엔드 점수가 있으면 사용, 없으면 outcome 기반 기본값
+  let score = result.backendScore !== undefined ? result.backendScore :
+    (outcome === "win" ? 100 : outcome === "fail" ? 0 : 50);
+
   let outcomeText = "주의 필요";
   let outcomeDescription = "보이스피싱 의심 상황이었습니다";
 
   if (outcome === "win") {
-    score = 100;
     outcomeText = "방어 성공!";
-    outcomeDescription = "보이스피싱을 성공적으로 차단했습니다";
+    outcomeDescription = result.feedback || "보이스피싱을 성공적으로 차단했습니다";
   } else if (outcome === "fail") {
-    score = 0;
     outcomeText = "위험 감지";
-    outcomeDescription = "개인정보 유출 위험이 있었습니다";
+    outcomeDescription = result.feedback || "개인정보 유출 위험이 있었습니다";
   } else if (outcome === "confusion") {
-    score = 50;
     outcomeText = "교착 상태";
-    outcomeDescription = "대화가 지속되었으나 정보를 제공하지 않았습니다";
+    outcomeDescription = result.feedback || "대화가 지속되었으나 정보를 제공하지 않았습니다";
   }
 
   return (
@@ -170,6 +171,18 @@ export default function ResultScreen({ navigation, route }) {
                 {result.callType === "voice" ? "전화" : "문자"}
               </Text>
             </View>
+            {result.endReason && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>종료 사유</Text>
+                <Text style={styles.infoValue}>{result.endReason}</Text>
+              </View>
+            )}
+            {result.backendScore !== undefined && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>상세 점수</Text>
+                <Text style={styles.infoValue}>{result.backendScore.toFixed(1)}점</Text>
+              </View>
+            )}
           </View>
         </View>
 
