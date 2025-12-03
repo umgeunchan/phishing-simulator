@@ -76,9 +76,22 @@ export const AppProvider = ({ children }) => {
     const newHistory = [result, ...trainingHistory].slice(0, 20);
     setTrainingHistory(newHistory);
 
-    const scoreChange = result.success ? 5 : -3;
-    const newScore = Math.max(0, Math.min(100, securityScore + scoreChange));
-    setSecurityScore(newScore);
+    // 새로운 점수 체계 적용
+    // Win (방어 성공): accuracy <= 0.2 → 100점
+    // Fail (방어 실패): accuracy >= 0.7 → 0점
+    // Confusion (교착): 최상위 티어 초과 또는 AI 항복 → 50점
+
+    // 평균 점수 계산 방식으로 보안 점수 업데이트
+    const totalTrainings = newHistory.length;
+    const totalScore = newHistory.reduce((sum, h) => {
+      if (h.outcome === "win") return sum + 100;
+      if (h.outcome === "confusion") return sum + 50;
+      if (h.outcome === "fail") return sum + 0;
+      return sum + (h.success ? 100 : 0); // 레거시
+    }, 0);
+
+    const averageScore = totalTrainings > 0 ? Math.round(totalScore / totalTrainings) : 72;
+    setSecurityScore(averageScore);
   };
 
   const getStats = () => {

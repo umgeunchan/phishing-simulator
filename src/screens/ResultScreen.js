@@ -18,8 +18,25 @@ export default function ResultScreen({ navigation, route }) {
     return null;
   }
 
-  const success = result.success;
-  const score = result.score || (success ? 85 : 45);
+  // 결과에서 outcome 기반 점수 계산
+  const outcome = result.outcome || (result.success ? "win" : "fail");
+  let score = 50; // 기본값 (confusion)
+  let outcomeText = "주의 필요";
+  let outcomeDescription = "보이스피싱 의심 상황이었습니다";
+
+  if (outcome === "win") {
+    score = 100;
+    outcomeText = "방어 성공!";
+    outcomeDescription = "보이스피싱을 성공적으로 차단했습니다";
+  } else if (outcome === "fail") {
+    score = 0;
+    outcomeText = "위험 감지";
+    outcomeDescription = "개인정보 유출 위험이 있었습니다";
+  } else if (outcome === "confusion") {
+    score = 50;
+    outcomeText = "교착 상태";
+    outcomeDescription = "대화가 지속되었으나 정보를 제공하지 않았습니다";
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -33,25 +50,33 @@ export default function ResultScreen({ navigation, route }) {
         <View
           style={[
             styles.scoreCard,
-            success ? styles.scoreCardSuccess : styles.scoreCardDanger,
+            outcome === "win" ? styles.scoreCardSuccess :
+            outcome === "fail" ? styles.scoreCardDanger :
+            styles.scoreCardWarning,
           ]}
         >
           <View style={styles.scoreIconContainer}>
             <Ionicons
-              name={success ? "checkmark-circle" : "close-circle"}
+              name={
+                outcome === "win" ? "checkmark-circle" :
+                outcome === "fail" ? "close-circle" :
+                "alert-circle"
+              }
               size={64}
-              color={success ? colors.green500 : colors.red600}
+              color={
+                outcome === "win" ? colors.green500 :
+                outcome === "fail" ? colors.red600 :
+                colors.yellow500
+              }
             />
           </View>
           <Text style={styles.scoreTitle}>
-            {success ? "잘 대응했습니다!" : "위험 감지"}
+            {outcomeText}
           </Text>
           <Text style={styles.scoreSubtitle}>
-            {success
-              ? "보이스피싱을 성공적으로 차단했습니다"
-              : "개인정보 유출 위험이 있었습니다"}
+            {outcomeDescription}
           </Text>
-          <Text style={styles.scoreValue}>{score}/100</Text>
+          <Text style={styles.scoreValue}>{score}점</Text>
         </View>
 
         {/* 위험 포인트 */}
@@ -200,6 +225,9 @@ const styles = StyleSheet.create({
   },
   scoreCardDanger: {
     backgroundColor: colors.red900,
+  },
+  scoreCardWarning: {
+    backgroundColor: colors.amber900,
   },
   scoreIconContainer: {
     marginBottom: 16,

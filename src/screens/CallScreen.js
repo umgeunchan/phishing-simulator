@@ -428,9 +428,43 @@ export default function CallScreen({ navigation, route }) {
       timestamp: msg.timestamp?.toISOString() || new Date().toISOString(),
     }));
 
+    // 시뮬레이션 결과 판정
+    // Win (방어 성공): 사용자가 조기 종료하거나 단시간에 종료
+    // Fail (방어 실패): 장시간 대화가 이어짐
+    // Confusion (교착): 중간 정도의 대화
+
+    let outcome = "confusion"; // 기본값
+    let success = false;
+
+    // 시뮬레이션 결과가 백엔드에서 제공된 경우
+    if (simulationResult) {
+      outcome = simulationResult.outcome || "confusion";
+      success = simulationResult.success || false;
+    } else {
+      // 대화 분석 기반 판정
+      const userMessages = serializedMessages.filter(msg => msg.type === "user").length;
+
+      // 사용자가 짧게 끊은 경우 (방어 성공)
+      if (callTime < 20 || userMessages < 3) {
+        outcome = "win";
+        success = true;
+      }
+      // 긴 대화가 이어진 경우 (방어 실패 - 피싱에 속고 있음)
+      else if (callTime > 120 || userMessages > 10) {
+        outcome = "fail";
+        success = false;
+      }
+      // 중간 정도 대화 (교착)
+      else {
+        outcome = "confusion";
+        success = false;
+      }
+    }
+
     const result = {
       scenarioName: currentScenario.name,
-      success: simulationResult?.success ?? (callTime > 30), // 30초 이상이면 성공으로 간주
+      success: success,
+      outcome: outcome,
       date: new Date().toLocaleString("ko-KR"),
       duration: callTime,
       callType: callType,
